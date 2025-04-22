@@ -1,38 +1,22 @@
-.App {
-  text-align: center;
+/* App.css */
+.react-calendar__navigation {
+  background: #0071bc;
 }
 
-.App-logo {
-  height: 40vmin;
-  pointer-events: none;
+.available-date {
+  color: black !important;
+  border-radius: 5px !important;
 }
 
-@media (prefers-reduced-motion: no-preference) {
-  .App-logo {
-    animation: App-logo-spin infinite 20s linear;
-  }
+.unavailable-date {
+  background-color: #f1f1f1; /* Light grey background */
+  color: #ee0000; /* Grey text */
+  text-decoration: line-through; /* Optional: strike through unavailable dates */
 }
 
-.App-header {
-  background-color: #282c34;
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  font-size: calc(10px + 2vmin);
-  color: white;
+
+.react-calendar__tile {
+  height: 45px !important;
 }
 
-.App-link {
-  color: #61dafb;
-}
 
-@keyframes App-logo-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
-}
