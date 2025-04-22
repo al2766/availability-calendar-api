@@ -41,6 +41,14 @@ function BookingForm() {
   // Navigation states
   const [currentMonth, setCurrentMonth] = useState(new Date().getMonth());
   const [currentYear, setCurrentYear] = useState(new Date().getFullYear());
+
+    // Navigation states
+    const [activeTab, setActiveTab] = useState("booking"); // "admin" or "bookings" now - booking tab routes to BookingForm
+    // Navigate to the booking form page
+
+  const navigateBack = () => {
+    window.location.href = '/';
+  };
   
   // Month names for date formatting
   const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -694,7 +702,16 @@ function BookingForm() {
   };
 
   return (
-    <div className="container max-w-6xl mx-auto">
+    
+    <div className="container max-w-6xl mx-auto p-6">
+         <div className="max-w-6xl mx-auto mb-6 flex gap-4">
+      <button 
+        onClick={navigateBack}
+        className="px-6 py-2 rounded bg-gray-200 text-gray-700"
+      >
+       Back
+      </button>
+    </div>
       <div className="flex flex-wrap gap-6">
         {/* Calendar Container */}
         <div className="calendar-container flex-grow-0 w-full md:w-5/12 bg-white rounded-lg shadow-md p-6">
