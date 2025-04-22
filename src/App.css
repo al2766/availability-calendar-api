@@ -6,6 +6,10 @@
 /* CalendarEdit.css */
 /* Add these styles to your App.css for enhanced calendar visualization */
 
+.calendar-container {
+  height: fit-content;
+}
+
 /* Bookings Calendar Styles */
 .bookings-calendar {
   width: 100%;
