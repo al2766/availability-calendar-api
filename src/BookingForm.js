@@ -639,6 +639,53 @@ function BookingForm() {
         console.error("Error updating time slots:", error);
         // Continue with the booking process even if there was an error updating time slots
       }
+
+      // In your handleSubmit function after successfully updating Firebase
+// Add this code after the Firebase update but before the email confirmation
+
+const notifyZapier = async (bookingData) => {
+    try {
+      // Send booking data to Zapier webhook
+      const response = await fetch('https://hooks.zapier.com/hooks/catch/22652608/2pozxou/', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          // Include all relevant booking information
+          customerName: formData.name,
+          customerEmail: formData.email,
+          customerPhone: formData.phone,
+          bookingDate: selectedDate,
+          bookingTime: selectedTime,
+          orderId: orderId,
+          propertyDetails: {
+            bedrooms: formData.bedrooms,
+            livingRooms: formData.livingRooms,
+            kitchens: formData.kitchens,
+            bathrooms: formData.bathrooms,
+            cleanliness: formData.cleanliness,
+            additionalRooms: additionalRooms.join(", ") || "None",
+            addOns: selectedAddOns.join(", ") || "None"
+          },
+          estimatedHours: priceBreakdown.estimatedHours,
+          totalPrice: priceBreakdown.totalPrice,
+          additionalInfo: formData.additionalInfo || "None provided",
+          // Add a timestamp for sorting in your task management system
+          submittedAt: new Date().toISOString()
+        })
+      });
+      
+      console.log('Zapier webhook triggered successfully');
+      
+    } catch (error) {
+      console.error('Error sending data to Zapier:', error);
+      // Continue with booking process even if Zapier fails
+    }
+  };
+  
+  // Call the function
+  await notifyZapier();
       
       // SECOND: Send email confirmation
       if (window.emailjs) {
