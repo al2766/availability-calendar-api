@@ -4,8 +4,6 @@ import "react-calendar/dist/Calendar.css";
 import { collection, getDocs, setDoc, deleteDoc, doc, deleteField, getDoc } from "firebase/firestore";
 import { db } from "./firebase";
 import "./App.css";
-import { BrowserRouter as Router, Routes, Route, Link, useNavigate } from 'react-router-dom';
-import BookingForm from './BookingForm';
 
 function App() {
   // Admin state variables for time slot management
