@@ -1,0 +1,830 @@
+// src/forms/HomeCleaningForm.js
+import React, { useState, useEffect } from "react";
+import Calendar from "react-calendar";
+import "react-calendar/dist/Calendar.css";
+import "../App.css";
+import useBookingLogic from "../hooks/useBookingLogic";
+
+function HomeCleaningForm() {
+  // Use the shared booking logic
+  const booking = useBookingLogic("home-cleaning");
+  
+  // Form-specific states for Home Cleaning
+  const [formData, setFormData] = useState({
+    name: "",
+    email: "",
+    phone: "",
+    bedrooms: "",
+    livingRooms: "",
+    kitchens: "",
+    bathrooms: "",
+    cleanliness: "",
+    additionalInfo: ""
+  });
+  
+  const [additionalRooms, setAdditionalRooms] = useState([]);
+  const [addOns, setAddOns] = useState([]);
+  const [priceBreakdown, setPriceBreakdown] = useState({
+    basePrice: 0,
+    roomsPrice: 0,
+    addonsPrice: 0,
+    totalPrice: 0,
+    estimatedHours: 0
+  });
+
+  // Navigate back function
+  const navigateBack = () => {
+    window.location.href = '/';
+  };
+
+  // Create a single function to recalculate prices whenever form data changes
+  useEffect(() => {
+    calculatePrice();
+  }, [formData, additionalRooms, addOns]);
+  
+  // Handle form input changes
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({
+      ...prev,
+      [name]: value
+    }));
+  };
+  
+  // Handle checkbox changes for additional rooms
+  const handleRoomCheckboxChange = (e) => {
+    const { value, checked } = e.target;
+    
+    setAdditionalRooms(prev => {
+      if (checked) {
+        return [...prev, value];
+      } else {
+        return prev.filter(room => room !== value);
+      }
+    });
+  };
+  
+  // Handle checkbox changes for add-ons
+  const handleAddonCheckboxChange = (e) => {
+    const { value, checked, dataset } = e.target;
+    const price = parseInt(dataset.price);
+    
+    setAddOns(prev => {
+      if (checked) {
+        return [...prev, { value, price }];
+      } else {
+        return prev.filter(addon => addon.value !== value);
+      }
+    });
+  };
+  
+  // Calculate price based on form inputs for home cleaning
+  const calculatePrice = () => {
+    const hourlyRate = 28; // £28 per hour
+    let baseHours = 0;
+    let additionalRoomsHours = 0;
+    let addonsCost = 0;
+    let dirtinessMultiplier = 1;
+    
+    // Base hours calculation based on property size
+    const bedrooms = parseInt(formData.bedrooms) || 0;
+    const livingRooms = parseInt(formData.livingRooms) || 0;
+    const kitchens = parseInt(formData.kitchens) || 0;
+    const bathrooms = parseInt(formData.bathrooms) || 0;
+    
+    // Calculate base hours
+    baseHours += bedrooms * 0.75; // 45 mins per bedroom
+    baseHours += livingRooms * 0.5; // 30 mins per living room
+    baseHours += kitchens * 1.0; // 1 hour per kitchen
+    baseHours += bathrooms * 0.75; // 45 mins per bathroom
+    
+    // Minimum base hours
+    baseHours = Math.max(baseHours, 2); // At least 2 hours
+    
+    // Dirtiness multiplier
+    const cleanliness = formData.cleanliness;
+    if (cleanliness === "quite-clean") {
+      dirtinessMultiplier = 1;
+    } else if (cleanliness === "average") {
+      dirtinessMultiplier = 1.2;
+    } else if (cleanliness === "quite-dirty") {
+      dirtinessMultiplier = 1.5;
+    } else if (cleanliness === "filthy") {
+      dirtinessMultiplier = 2;
+    }
+    
+    // Apply dirtiness multiplier
+    baseHours *= dirtinessMultiplier;
+    
+    // Calculate additional rooms hours
+    additionalRooms.forEach(room => {
+      if (room === "garage") {
+        additionalRoomsHours += 0.5; // 30 mins for garage
+      } else if (room === "dining-room") {
+        additionalRoomsHours += 0.5; // 30 mins for dining room
+      } else if (room === "conservatory") {
+        additionalRoomsHours += 0.75; // 45 mins for conservatory
+      } else if (room === "utility-room") {
+        additionalRoomsHours += 0.5; // 30 mins for utility room
+      }
+    });
+    
+    // Calculate add-ons cost
+    addOns.forEach(addon => {
+      addonsCost += addon.price || 0;
+    });
+    
+    // Calculate costs
+    const basePrice = Math.ceil(baseHours) * hourlyRate;
+    const roomsPrice = Math.ceil(additionalRoomsHours) * hourlyRate;
+    const totalHours = Math.ceil(baseHours + additionalRoomsHours);
+    const totalPrice = basePrice + roomsPrice + addonsCost;
+    
+    // Update price breakdown
+    setPriceBreakdown({
+      basePrice: basePrice.toFixed(2),
+      roomsPrice: roomsPrice.toFixed(2),
+      addonsPrice: addonsCost.toFixed(2),
+      totalPrice: totalPrice.toFixed(2),
+      estimatedHours: totalHours
+    });
+  };
+  
+  // Handle form submission with race condition prevention
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    
+    if (!booking.selectedDate) {
+      alert("Please select a date from the calendar.");
+      return;
+    }
+    
+    if (!booking.selectedTime) {
+      alert("Please select a time slot.");
+      return;
+    }
+    
+    // Get submit button
+    const submitButton = document.getElementById("submit-btn");
+    submitButton.disabled = true;
+    submitButton.innerHTML = `<span class="spinner"></span> Submitting...`;
+    
+    try {
+      // Generate order ID
+      const orderId = "LUX" + Date.now().toString().slice(-6);
+      const serviceType = "Home Cleaning"
+      
+      // Collect selected add-ons and additional rooms
+      const selectedAddOns = addOns.map(addon => addon.value);
+      
+      // Prepare booking info with service type
+      const bookingInfo = {
+        service: "Home Cleaning", // Specify service type
+        email: formData.email,
+        phone: formData.phone,
+        name: formData.name,
+        orderId: orderId,
+        timestamp: new Date().toISOString(),
+        bedrooms: formData.bedrooms === "0" ? "0 (Studio)" : formData.bedrooms,
+        livingRooms: formData.livingRooms,
+        kitchens: formData.kitchens,
+        bathrooms: formData.bathrooms,
+        cleanliness: formData.cleanliness,
+        additionalRooms: additionalRooms.join(", ") || "None",
+        addOns: selectedAddOns.join(", ") || "None",
+        totalPrice: priceBreakdown.totalPrice,
+        estimatedHours: priceBreakdown.estimatedHours,
+        additionalInfo: formData.additionalInfo ?? null
+      };
+      
+      // Prepare form data for email template
+      const templateParams = {
+        service: "Home Cleaning", // Add service type
+        name: formData.name,
+        email: formData.email,
+        phone: formData.phone,
+        date: booking.formatDisplayDate(booking.selectedDate).replace("Selected Date: ", ""),
+        time: booking.selectedTime,
+        bedrooms: formData.bedrooms === "0" ? "0 (Studio)" : formData.bedrooms,
+        livingRooms: formData.livingRooms,
+        kitchens: formData.kitchens,
+        bathrooms: formData.bathrooms,
+        cleanliness: formData.cleanliness,
+        additionalRooms: additionalRooms.join(", ") || "None",
+        addOns: selectedAddOns.join(", ") || "None",
+        totalPrice: `£${priceBreakdown.totalPrice}`,
+        estimatedHours: `${priceBreakdown.estimatedHours} hour(s)`,
+        order_id: orderId,
+        additionalInfo: formData.additionalInfo || "None provided"
+      };
+      
+      // FIRST: Update the time slots in Firebase
+      try {
+        // Update time slots for this booking
+        const { updatedBookedSlots, fullyBooked } = await booking.updateTimeSlots(
+          booking.selectedDate, 
+          booking.selectedTime, 
+          priceBreakdown.estimatedHours,
+          bookingInfo
+        );
+      } catch (error) {
+        console.error("Error updating time slots:", error);
+        // Continue with the booking process even if there was an error updating time slots
+      }
+
+     
+    // Use this function in both HomeCleaningForm.js and OfficeCleaningForm.js
+const notifyZapier = async () => {
+    try {
+      // Prepare the data with proper flat structure for Zapier
+      const zapierData = {
+        // Put important fields at the top level for easy access in Zapier
+        customerName: formData.name,
+        customerEmail: formData.email,
+        customerPhone: formData.phone,
+        bookingDate: booking.formatDisplayDate(booking.selectedDate).replace("Selected Date: ", ""),
+        bookingTime: booking.selectedTime,
+        orderId: orderId,
+        serviceType: serviceType, // "Home Cleaning" or "Office Cleaning"
+        estimatedHours: priceBreakdown.estimatedHours,
+        totalPrice: priceBreakdown.totalPrice,
+        additionalInfo: formData.additionalInfo || "None provided",
+        submittedAt: new Date().toISOString(),
+        
+        // Include detailed property info in a nested object
+        // This keeps it organized but doesn't interfere with top-level fields
+        propertyDetails: {
+          // For Home Cleaning Form
+          bedrooms: formData.bedrooms,
+          livingRooms: formData.livingRooms,
+          kitchens: formData.kitchens,
+          bathrooms: formData.bathrooms,
+          cleanliness: formData.cleanliness,
+          additionalRooms: additionalRooms?.join(", ") || "None",
+          addOns: selectedAddOns?.join(", ") || "None"
+          
+          // For Office Cleaning Form, include these fields instead (in OfficeCleaningForm.js)
+          
+        //   officeRooms: formData.officeRooms,
+        //   officeSize: officeSizeText,
+        //   meetingRooms: formData.meetingRooms,
+        //   meetingRoomSize: meetingRoomSizeText,
+        //   kitchens: formData.kitchens,
+        //   bathrooms: formData.bathrooms,
+        //   cleanliness: formData.cleanliness,
+        //   additionalAreas: additionalAreas?.join(", ") || "None",
+        //   addOns: selectedAddOns?.join(", ") || "None"
+          
+        }
+      };
+      
+      console.log('Sending data to Zapier:', zapierData);
+      
+      // Send booking data to Zapier webhook
+      const response = await fetch('https://hooks.zapier.com/hooks/catch/22652608/2pozxou/', {
+        method: 'POST',
+        mode: "no-cors",
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(zapierData)
+      });
+      
+      if (response.status) {
+        console.log('Zapier webhook triggered successfully');
+      } else {
+        console.error('Zapier webhook failed with status:', response.status);
+      }
+    } catch (error) {
+      console.error('Error sending data to Zapier:', error);
+      // Continue with booking process even if Zapier fails
+    }
+  };
+  
+  // Call the function in your handleSubmit function:
+  await notifyZapier();
+      
+      // SECOND: Send email confirmation
+      if (window.emailjs) {
+        await window.emailjs.send('service_04pgv28', 'template_0cbdpse', templateParams);
+        
+        submitButton.innerHTML = "Booking Confirmed!";
+        alert("Your booking has been confirmed! Check your email for details.");
+        
+        // Reset form
+        booking.setSelectedDate(null);
+        booking.setSelectedTime("");
+        setFormData({
+          name: "",
+          email: "",
+          phone: "",
+          bedrooms: "",
+          livingRooms: "",
+          kitchens: "",
+          bathrooms: "",
+          cleanliness: "",
+          additionalInfo: ""
+        });
+        setAdditionalRooms([]);
+        setAddOns([]);
+        calculatePrice();
+        
+        // Re-enable submit button after delay
+        setTimeout(() => {
+          submitButton.innerHTML = "Book Now";
+          submitButton.disabled = false;
+        }, 3000);
+      } else {
+        console.error("EmailJS not loaded");
+        throw new Error("Email service not available");
+      }
+    } catch (error) {
+      console.error("Error submitting booking:", error);
+      submitButton.innerHTML = "Book Now";
+      submitButton.disabled = false;
+      alert("Sorry, there was a problem submitting your booking. Please try again.");
+    }
+  };
+
+  return (
+    <div className="container max-w-6xl mx-auto p-6">
+      <div className="max-w-6xl mx-auto mb-6 flex gap-4">
+        <button 
+          onClick={navigateBack}
+          className="px-6 py-2 rounded bg-gray-200 text-gray-700"
+        >
+          Back
+        </button>
+      </div>
+      
+      <h1 className="text-2xl font-bold mb-6 text-center">Home Cleaning Service</h1>
+      
+      <div className="flex flex-wrap gap-6">
+        {/* Calendar Container */}
+        <div className="calendar-container flex-grow-0 w-full md:w-5/12 bg-white rounded-lg shadow-md p-6">
+          {booking.loading ? (
+            <p>Loading...</p>
+          ) : (
+            <Calendar
+              activeStartDate={new Date(booking.currentYear, booking.currentMonth, 1)}
+              onClickDay={booking.handleDateSelect}
+              tileClassName={booking.tileClassName}
+              view="month"
+              className="booking-calendar"
+              formatShortWeekday={(locale, date) => 
+                ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'][date.getDay()]
+              }
+              prevLabel="< Prev"
+              nextLabel="Next >"
+              navigationLabel={({ date }) => `${booking.monthNames[date.getMonth()]} ${date.getFullYear()}`}
+              onActiveStartDateChange={({ activeStartDate }) => {
+                booking.setCurrentMonth(activeStartDate.getMonth());
+                booking.setCurrentYear(activeStartDate.getFullYear());
+              }}
+              minDate={booking.getCalendarMinMaxDates().minDate}
+              maxDate={booking.getCalendarMinMaxDates().maxDate}
+            />
+          )}
+          
+          {/* Time Slot Container */}
+          <div className="time-slot-container mt-6 p-6 bg-white rounded-lg">
+            <h2 className="time-slot-title text-lg text-blue-600 font-medium mb-4">
+              {booking.selectedDate ? "Select a Time" : "Please select a date first"}
+            </h2>
+            {booking.selectedDate && (
+              <div className="time-slots-grid grid grid-cols-3 gap-2 md:gap-3">
+                {booking.availableTimeSlots.map((slot, index) => (
+                  <div 
+                    key={index}
+                    className={`time-slot p-3 text-center border rounded-md 
+                      ${!slot.available ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'cursor-pointer hover:bg-blue-100'} 
+                      ${booking.selectedTime === slot.value ? 'selected' : ''}`}
+                    onClick={() => slot.available && booking.handleTimeSelect(slot.value)}
+                  >
+                    {slot.display}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+        
+        {/* Form Container */}
+        <div className="form-container flex-grow w-full md:w-6/12">
+          <form className="fs-form bg-white rounded-lg shadow-md p-6" onSubmit={handleSubmit}>
+            {/* Hidden inputs */}
+            <input type="hidden" id="selected-date" value={booking.selectedDate || ""} />
+            <input type="hidden" id="selected-time" value={booking.selectedTime} />
+            
+            {/* Selected Date Display */}
+            <div className="fs-field mb-4">
+              <span id="date-label" className="selected-date text-blue-600">
+                {booking.formatDisplayDate(booking.selectedDate)}
+              </span>
+            </div>
+            
+            {/* Personal Information */}
+            <div className="fs-section-title text-lg text-blue-600 font-medium mb-2 pb-2 border-b">
+              Personal Information
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+              <div className="fs-field">
+                <label className="fs-label block text-gray-700 mb-1" htmlFor="name">Name</label>
+                <input 
+                  className="fs-input w-full p-2 border rounded-lg" 
+                  type="text" 
+                  id="name" 
+                  name="name"
+                  value={formData.name}
+                  onChange={handleInputChange}
+                  required 
+                />
+              </div>
+              
+              <div className="fs-field">
+                <label className="fs-label block text-gray-700 mb-1" htmlFor="email">Email</label>
+                <input 
+                  className="fs-input w-full p-2 border rounded-lg" 
+                  type="email" 
+                  id="email" 
+                  name="email"
+                  value={formData.email}
+                  onChange={handleInputChange}
+                  required 
+                />
+              </div>
+            </div>
+            
+            <div className="fs-field mb-4">
+              <label className="fs-label block text-gray-700 mb-1" htmlFor="phone">Phone Number</label>
+              <input 
+                className="fs-input w-full p-2 border rounded-lg" 
+                type="tel" 
+                id="phone" 
+                name="phone"
+                value={formData.phone}
+                onChange={handleInputChange}
+                required 
+              />
+            </div>
+            
+            {/* Property Details */}
+            <div className="fs-section-title text-lg text-blue-600 font-medium mb-2 pb-2 border-b">
+              Property Details
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+              <div className="fs-field">
+                <label className="fs-label block text-gray-700 mb-1" htmlFor="bedrooms">
+                  How many bedrooms?
+                </label>
+                <select 
+                  className="fs-select w-full p-2 border rounded-lg" 
+                  id="bedrooms" 
+                  name="bedrooms"
+                  value={formData.bedrooms}
+                  onChange={handleInputChange}
+                  required
+                >
+                  <option value="" disabled>Select number of bedrooms</option>
+                  <option value="0">0 (Studio)</option>
+                  <option value="1">1</option>
+                  <option value="2">2</option>
+                  <option value="3">3</option>
+                  <option value="4">4</option>
+                  <option value="5">5+</option>
+                </select>
+              </div>
+              
+              <div className="fs-field">
+                <label className="fs-label block text-gray-700 mb-1" htmlFor="livingRooms">
+                  How many living rooms?
+                </label>
+                <select 
+                  className="fs-select w-full p-2 border rounded-lg" 
+                  id="livingRooms" 
+                  name="livingRooms"
+                  value={formData.livingRooms}
+                  onChange={handleInputChange}
+                  required
+                >
+                  <option value="" disabled>Select number of living rooms</option>
+                  <option value="0">0</option>
+                  <option value="1">1</option>
+                  <option value="2">2</option>
+                  <option value="3">3+</option>
+                </select>
+              </div>
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+              <div className="fs-field">
+                <label className="fs-label block text-gray-700 mb-1" htmlFor="kitchens">
+                  How many kitchens?
+                </label>
+                <select 
+                  className="fs-select w-full p-2 border rounded-lg" 
+                  id="kitchens" 
+                  name="kitchens"
+                  value={formData.kitchens}
+                  onChange={handleInputChange}
+                  required
+                >
+                  <option value="" disabled>Select number of kitchens</option>
+                  <option value="0">0</option>
+                  <option value="1">1</option>
+                  <option value="2">2+</option>
+                </select>
+              </div>
+              
+              <div className="fs-field">
+                <label className="fs-label block text-gray-700 mb-1" htmlFor="bathrooms">
+                  How many bathrooms/toilets?
+                </label>
+                <select 
+                  className="fs-select w-full p-2 border rounded-lg" 
+                  id="bathrooms" 
+                  name="bathrooms"
+                  value={formData.bathrooms}
+                  onChange={handleInputChange}
+                  required
+                >
+                  <option value="" disabled>Select number of bathrooms</option>
+                  <option value="0">0</option>
+                  <option value="1">1</option>
+                  <option value="2">2</option>
+                  <option value="3">3</option>
+                  <option value="4">4+</option>
+                </select>
+              </div>
+            </div>
+            
+            <div className="fs-field mb-4">
+              <label className="fs-label block text-gray-700 mb-1" htmlFor="cleanliness">
+                How dirty is the property?
+              </label>
+              <select 
+                className="fs-select w-full p-2 border rounded-lg" 
+                id="cleanliness" 
+                name="cleanliness"
+                value={formData.cleanliness}
+                onChange={handleInputChange}
+                required
+              >
+                <option value="" disabled>Select cleanliness level</option>
+                <option value="quite-clean">Quite clean</option>
+                <option value="average">Average</option>
+                <option value="quite-dirty">Quite dirty</option>
+                <option value="filthy">Filthy</option>
+              </select>
+            </div>
+            
+            {/* Additional Rooms */}
+            <div className="fs-section-title text-lg text-blue-600 font-medium mb-2 pb-2 border-b">
+              Additional Rooms
+            </div>
+            
+            <div className="fs-checkbox-group mb-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                <div className="fs-checkbox-item flex items-center">
+                  <input 
+                    type="checkbox" 
+                    id="garage" 
+                    name="additional-rooms[]" 
+                    value="garage" 
+                    className="fs-checkbox w-5 h-5 mr-2"
+                    checked={additionalRooms.includes("garage")}
+                    onChange={handleRoomCheckboxChange}
+                  />
+                  <label htmlFor="garage" className="fs-checkbox-label">Garage</label>
+                </div>
+                <div className="fs-checkbox-item flex items-center">
+                  <input 
+                    type="checkbox" 
+                    id="dining-room" 
+                    name="additional-rooms[]" 
+                    value="dining-room" 
+                    className="fs-checkbox w-5 h-5 mr-2"
+                    checked={additionalRooms.includes("dining-room")}
+                    onChange={handleRoomCheckboxChange}
+                  />
+                  <label htmlFor="dining-room" className="fs-checkbox-label">Dining room</label>
+                </div>
+                <div className="fs-checkbox-item flex items-center">
+                  <input 
+                    type="checkbox" 
+                    id="conservatory" 
+                    name="additional-rooms[]" 
+                    value="conservatory" 
+                    className="fs-checkbox w-5 h-5 mr-2"
+                    checked={additionalRooms.includes("conservatory")}
+                    onChange={handleRoomCheckboxChange}
+                  />
+                  <label htmlFor="conservatory" className="fs-checkbox-label">Conservatory</label>
+                </div>
+                <div className="fs-checkbox-item flex items-center">
+                  <input 
+                    type="checkbox" 
+                    id="utility-room" 
+                    name="additional-rooms[]" 
+                    value="utility-room" 
+                    className="fs-checkbox w-5 h-5 mr-2"
+                    checked={additionalRooms.includes("utility-room")}
+                    onChange={handleRoomCheckboxChange}
+                  />
+                  <label htmlFor="utility-room" className="fs-checkbox-label">Utility room</label>
+                </div>
+              </div>
+            </div>
+            
+            {/* Add-on Services */}
+            <div className="fs-section-title text-lg text-blue-600 font-medium mb-2 pb-2 border-b">
+              Add-on Services
+            </div>
+            
+            <div className="fs-checkbox-group mb-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                <div className="fs-checkbox-item flex items-center">
+                  <input 
+                    type="checkbox" 
+                    id="freezer" 
+                    name="add-ons[]" 
+                    value="freezer" 
+                    className="fs-checkbox w-5 h-5 mr-2"
+                    data-price="25"
+                    checked={addOns.some(addon => addon.value === "freezer")}
+                    onChange={handleAddonCheckboxChange}
+                  />
+                  <label htmlFor="freezer" className="fs-checkbox-label">
+                    Freezer - empty (£25)
+                  </label>
+                </div>
+                <div className="fs-checkbox-item flex items-center">
+                  <input 
+                    type="checkbox" 
+                    id="fridge" 
+                    name="add-ons[]" 
+                    value="fridge" 
+                    className="fs-checkbox w-5 h-5 mr-2"
+                    data-price="20"
+                    checked={addOns.some(addon => addon.value === "fridge")}
+                    onChange={handleAddonCheckboxChange}
+                  />
+                  <label htmlFor="fridge" className="fs-checkbox-label">
+                    Fridge - empty (£20)
+                  </label>
+                </div>
+                <div className="fs-checkbox-item flex items-center">
+                  <input 
+                    type="checkbox" 
+                    id="fridge-freezer" 
+                    name="add-ons[]" 
+                    value="fridge-freezer" 
+                    className="fs-checkbox w-5 h-5 mr-2"
+                    data-price="60"
+                    checked={addOns.some(addon => addon.value === "fridge-freezer")}
+                    onChange={handleAddonCheckboxChange}
+                  />
+                  <label htmlFor="fridge-freezer" className="fs-checkbox-label">
+                    Fridge + freezer clean (£60)
+                  </label>
+                </div>
+                <div className="fs-checkbox-item flex items-center">
+                  <input 
+                    type="checkbox" 
+                    id="ironing" 
+                    name="add-ons[]" 
+                    value="ironing" 
+                    className="fs-checkbox w-5 h-5 mr-2"
+                    data-price="30"
+                    checked={addOns.some(addon => addon.value === "ironing")}
+                    onChange={handleAddonCheckboxChange}
+                  />
+                  <label htmlFor="ironing" className="fs-checkbox-label">
+                    Ironing (£30)
+                  </label>
+                </div>
+                <div className="fs-checkbox-item flex items-center">
+                  <input 
+                    type="checkbox" 
+                    id="oven" 
+                    name="add-ons[]" 
+                    value="oven" 
+                    className="fs-checkbox w-5 h-5 mr-2"
+                    data-price="40"
+                    checked={addOns.some(addon => addon.value === "oven")}
+                    onChange={handleAddonCheckboxChange}
+                  />
+                  <label htmlFor="oven" className="fs-checkbox-label">
+                    Oven (£40)
+                  </label>
+                </div>
+                <div className="fs-checkbox-item flex items-center">
+                  <input 
+                    type="checkbox" 
+                    id="kitchen-cupboard" 
+                    name="add-ons[]" 
+                    value="kitchen-cupboard" 
+                    className="fs-checkbox w-5 h-5 mr-2"
+                    data-price="15"
+                    checked={addOns.some(addon => addon.value === "kitchen-cupboard")}
+                    onChange={handleAddonCheckboxChange}
+                  />
+                  <label htmlFor="kitchen-cupboard" className="fs-checkbox-label">
+                    Kitchen cupboard (£15 each)
+                  </label>
+                </div>
+                <div className="fs-checkbox-item flex items-center">
+                  <input 
+                    type="checkbox" 
+                    id="blind-cleaning" 
+                    name="add-ons[]" 
+                    value="blind-cleaning" 
+                    className="fs-checkbox w-5 h-5 mr-2"
+                    data-price="35"
+                    checked={addOns.some(addon => addon.value === "blind-cleaning")}
+                    onChange={handleAddonCheckboxChange}
+                  />
+                  <label htmlFor="blind-cleaning" className="fs-checkbox-label">
+                    Blind cleaning (£35)
+                  </label>
+                </div>
+                <div className="fs-checkbox-item flex items-center">
+                  <input 
+                    type="checkbox" 
+                    id="curtain" 
+                    name="add-ons[]" 
+                    value="curtain" 
+                    className="fs-checkbox w-5 h-5 mr-2"
+                    data-price="40"
+                    checked={addOns.some(addon => addon.value === "curtain")}
+                    onChange={handleAddonCheckboxChange}
+                  />
+                  <label htmlFor="curtain" className="fs-checkbox-label">
+                    Curtain (£40)
+                  </label>
+                </div>
+              </div>
+            </div>
+            
+            {/* Additional Information */}
+            <div className="fs-section-title text-lg text-blue-600 font-medium mb-2 pb-2 border-b">
+              Additional Information
+            </div>
+            
+            <div className="fs-field mb-4">
+              <label className="fs-label block text-gray-700 mb-1" htmlFor="additionalInfo">
+                Please share any other details that would help us
+              </label>
+              <textarea 
+                className="fs-textarea w-full p-2 border rounded-lg min-h-24" 
+                id="additionalInfo" 
+                name="additionalInfo"
+                value={formData.additionalInfo || ""}
+                onChange={handleInputChange}
+              ></textarea>
+            </div>
+            
+            {/* Price Breakdown */}
+            <div className="fs-price-breakdown bg-gray-50 p-4 rounded-lg mb-6">
+              <div className="fs-price-item flex justify-between mb-2">
+                <span>Base cleaning cost:</span>
+                <span id="base-price">£{priceBreakdown.basePrice}</span>
+              </div>
+              <div className="fs-price-item flex justify-between mb-2">
+                <span>Additional rooms:</span>
+                <span id="rooms-price">£{priceBreakdown.roomsPrice}</span>
+              </div>
+              <div className="fs-price-item flex justify-between mb-2">
+                <span>Add-on services:</span>
+                <span id="addons-price">£{priceBreakdown.addonsPrice}</span>
+              </div>
+              <div className="fs-price-total flex justify-between pt-2 border-t mt-2 text-blue-600 font-medium">
+                <span>Total:</span>
+                <span id="total-price-display">£{priceBreakdown.totalPrice}</span>
+              </div>
+              <div className="fs-price-item flex justify-between mt-2 italic">
+                <span>Estimated time:</span>
+                <span id="estimated-time">{priceBreakdown.estimatedHours} hour{priceBreakdown.estimatedHours !== 1 ? 's' : ''}</span>
+              </div>
+            </div>
+            
+            {/* Submit Button */}
+            <div className="fs-button-group">
+              <button 
+                className="fs-button bg-blue-600 text-white font-medium py-3 px-6 rounded-lg hover:bg-blue-700 transition duration-200 w-full md:w-auto"
+                type="submit" 
+                id="submit-btn"
+              >
+                Book Now
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default HomeCleaningForm;

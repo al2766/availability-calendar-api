@@ -11,9 +11,7 @@ body {
   @apply max-w-lg mx-auto p-8;
 }
 
-input[type="text"] {
-  @apply mb-4 p-2 w-full border rounded;
-}
+
 
 button {
   @apply bg-blue-500 text-white p-2 rounded transition-colors duration-300 hover:bg-blue-600 hover:text-white;

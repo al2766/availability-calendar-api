@@ -659,34 +659,37 @@ const tileClassName = ({ date, view }) => {
   }
 };
 
-// Navigate to the booking form page
-const navigateToBookingForm = () => {
-  window.location.href = '/booking';
-};
 
 return (
   <div className="min-h-screen bg-gray-100 p-6">
     {/* Admin/Booking Tabs */}
-    <div className="max-w-6xl mx-auto mb-6 flex gap-4">
-      <button 
-        onClick={() => setActiveTab("admin")}
-        className={`px-6 py-2 rounded ${activeTab === "admin" ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-700"}`}
-      >
-        Admin
-      </button>
-      <button 
-        onClick={() => setActiveTab("bookings")}
-        className={`px-6 py-2 rounded ${activeTab === "bookings" ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-700"}`}
-      >
-        Bookings
-      </button>
-      <button 
-        onClick={navigateToBookingForm}
-        className="px-6 py-2 rounded bg-gray-200 text-gray-700"
-      >
-        View Booking Form
-      </button>
-    </div>
+   {/* Admin/Booking Tabs */}
+<div className="max-w-6xl mx-auto mb-6 flex gap-4">
+  <button 
+    onClick={() => setActiveTab("admin")}
+    className={`px-6 py-2 rounded ${activeTab === "admin" ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-700"}`}
+  >
+    Admin
+  </button>
+  <button 
+    onClick={() => setActiveTab("bookings")}
+    className={`px-6 py-2 rounded ${activeTab === "bookings" ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-700"}`}
+  >
+    Bookings
+  </button>
+  <button 
+    onClick={() => window.location.href = '/booking/home'}
+    className="px-6 py-2 rounded bg-gray-200 text-gray-700"
+  >
+    Home Cleaning Form
+  </button>
+  <button 
+    onClick={() => window.location.href = '/booking/office'}
+    className="px-6 py-2 rounded bg-gray-200 text-gray-700"
+  >
+    Office Cleaning Form
+  </button>
+</div>
     
     {activeTab === "bookings" ? (
       // Bookings Management View
