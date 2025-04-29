@@ -251,9 +251,7 @@ const notifyZapier = async () => {
         additionalInfo: formData.additionalInfo || "None provided",
         submittedAt: new Date().toISOString(),
         
-        // Include detailed property info in a nested object
-        // This keeps it organized but doesn't interfere with top-level fields
-        propertyDetails: {
+      
           // For Home Cleaning Form
           bedrooms: formData.bedrooms,
           livingRooms: formData.livingRooms,
@@ -275,7 +273,7 @@ const notifyZapier = async () => {
         //   additionalAreas: additionalAreas?.join(", ") || "None",
         //   addOns: selectedAddOns?.join(", ") || "None"
           
-        }
+        
       };
       
       console.log('Sending data to Zapier:', zapierData);
