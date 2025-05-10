@@ -4,6 +4,11 @@ import "react-calendar/dist/Calendar.css";
 import { collection, getDocs, setDoc, deleteDoc, doc, deleteField, getDoc } from "firebase/firestore";
 import { db } from "./firebase";
 import "./App.css";
+import GenerateChecklistButton from './components/CleaningChecklist';
+import ConfirmModal from './components/ConfirmModal'; // Import the new modal component
+import QuoteModal from './components/QuoteModal';
+
+
 
 function App() {
   // Admin state variables for time slot management
@@ -15,6 +20,8 @@ function App() {
   const [unavailableDates, setUnavailableDates] = useState(new Set());
   const [loading, setLoading] = useState(true);
   const [timeSlotData, setTimeSlotData] = useState({});
+
+  
   
   // Navigation states
   const [activeTab, setActiveTab] = useState("admin"); // "admin" or "bookings" now - booking tab routes to BookingForm
@@ -31,6 +38,45 @@ function App() {
   const [bookingFilter, setBookingFilter] = useState("upcoming"); // "all", "upcoming", "past", "today"
   const [selectedBooking, setSelectedBooking] = useState(null);
   const [bookingSearchTerm, setBookingSearchTerm] = useState("");
+  
+  // Staff management states
+const [staff, setStaff] = useState([]);
+const [staffLoading, setStaffLoading] = useState(false);
+const [showAddStaffModal, setShowAddStaffModal] = useState(false);
+const [editingStaff, setEditingStaff] = useState(null);
+const [staffForm, setStaffForm] = useState({
+  name: '',
+  email: '',
+  phone: '',
+  availability: {
+    monday: { available: true, startTime: '07:00', endTime: '20:00' },
+    tuesday: { available: true, startTime: '07:00', endTime: '20:00' },
+    wednesday: { available: true, startTime: '07:00', endTime: '20:00' },
+    thursday: { available: true, startTime: '07:00', endTime: '20:00' },
+    friday: { available: true, startTime: '07:00', endTime: '20:00' },
+    saturday: { available: true, startTime: '07:00', endTime: '20:00' },
+    sunday: { available: false, startTime: '07:00', endTime: '20:00' }
+  },
+  active: true
+});
+// Add these to your component's state declarations
+const [quoteModal, setQuoteModal] = useState({ 
+  isOpen: false, 
+  booking: null 
+});
+const [quoteSending, setQuoteSending] = useState({
+  inProgress: false,
+  bookingId: null,
+  timer: null,
+  quoteAmount: null
+});
+  // Add state for confirm modal
+const [confirmModal, setConfirmModal] = useState({
+  isOpen: false,
+  bookingId: null,
+  title: '',
+  message: ''
+});
 
   // Add this useEffect to fetch bookings data
   useEffect(() => {
@@ -195,6 +241,143 @@ function App() {
     }
   };
 
+  const fetchStaff = async () => {
+    try {
+      setStaffLoading(true);
+      const snapshot = await getDocs(collection(db, "staff"));
+      const staffList = snapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      setStaff(staffList);
+      setStaffLoading(false); // Make sure this is called
+    } catch (error) {
+      console.error("Error fetching staff:", error);
+      setStaff([]); // Set empty array on error
+      setStaffLoading(false); // Make sure this is called even on error
+    }
+  };
+
+const saveStaff = async (e) => {
+  e.preventDefault();
+  try {
+    if (editingStaff) {
+      // Update existing staff
+      await setDoc(doc(db, "staff", editingStaff.id), {
+        ...staffForm,
+        updatedAt: new Date().toISOString()
+      });
+    } else {
+      // Add new staff (use timestamp as ID)
+      await setDoc(doc(db, "staff", Date.now().toString()), {
+        ...staffForm,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      });
+    }
+    
+    // Reset form and close modal
+    setStaffForm({
+      name: '',
+      email: '',
+      phone: '',
+      availability: {
+        monday: { available: true, startTime: '07:00', endTime: '20:00' },
+        tuesday: { available: true, startTime: '07:00', endTime: '20:00' },
+        wednesday: { available: true, startTime: '07:00', endTime: '20:00' },
+        thursday: { available: true, startTime: '07:00', endTime: '20:00' },
+        friday: { available: true, startTime: '07:00', endTime: '20:00' },
+        saturday: { available: true, startTime: '07:00', endTime: '20:00' },
+        sunday: { available: false, startTime: '07:00', endTime: '20:00' }
+      },
+      active: true
+    });
+    setShowAddStaffModal(false);
+    setEditingStaff(null);
+    
+    // Refresh staff list
+    await fetchStaff();
+    
+    // Show success message
+    const successMessage = document.createElement('div');
+    successMessage.innerHTML = `<div class="fixed top-0 right-0 m-4 p-4 bg-green-500 text-white rounded shadow-lg transition-opacity duration-500">
+      Staff ${editingStaff ? 'updated' : 'added'} successfully!
+    </div>`;
+    document.body.appendChild(successMessage);
+    
+    setTimeout(() => {
+      successMessage.querySelector('div').style.opacity = '0';
+      setTimeout(() => document.body.removeChild(successMessage), 500);
+    }, 3000);
+    
+  } catch (error) {
+    console.error("Error saving staff:", error);
+    alert(`Error saving staff: ${error.message}. Please check your Firebase permissions and try again.`);
+  }
+};
+
+const deleteStaff = async (staffId) => {
+  if (window.confirm("Are you sure you want to delete this staff member?")) {
+    try {
+      await deleteDoc(doc(db, "staff", staffId));
+      await fetchStaff();
+      
+      // Show success message
+      const successMessage = document.createElement('div');
+      successMessage.innerHTML = '<div class="fixed top-0 right-0 m-4 p-4 bg-green-500 text-white rounded shadow-lg transition-opacity duration-500">Staff member deleted successfully!</div>';
+      document.body.appendChild(successMessage);
+      
+      setTimeout(() => {
+        successMessage.querySelector('div').style.opacity = '0';
+        setTimeout(() => document.body.removeChild(successMessage), 500);
+      }, 3000);
+    } catch (error) {
+      console.error("Error deleting staff:", error);
+      alert("Error deleting staff. Please try again.");
+    }
+  }
+};
+
+const editStaff = (staffMember) => {
+  setEditingStaff(staffMember);
+  setStaffForm({
+    name: staffMember.name,
+    email: staffMember.email,
+    phone: staffMember.phone,
+    availability: staffMember.availability,
+    active: staffMember.active
+  });
+  setShowAddStaffModal(true);
+};
+
+const handleStaffFormChange = (e) => {
+  const { name, value, type, checked } = e.target;
+  if (type === 'checkbox') {
+    setStaffForm(prev => ({
+      ...prev,
+      [name]: checked
+    }));
+  } else {
+    setStaffForm(prev => ({
+      ...prev,
+      [name]: value
+    }));
+  }
+};
+
+const handleAvailabilityChange = (day, field, value) => {
+  setStaffForm(prev => ({
+    ...prev,
+    availability: {
+      ...prev.availability,
+      [day]: {
+        ...prev.availability[day],
+        [field]: value
+      }
+    }
+  }));
+};
+
   // Add these functions for bookings management
   const fetchBookings = async () => {
     try {
@@ -248,7 +431,7 @@ function App() {
               date: dateStr,
               timeSlots: [],
               timeSlotDetails: {},
-              customerName: bookingData.bookedBy || bookingData.name || "Unknown",
+              customerName: bookingData.name || "Unknown",
               customerEmail: bookingData.email || bookingData.bookedBy || "No email provided",
               customerPhone: bookingData.phone || "No phone provided",
               status: "confirmed", // Default status
@@ -365,11 +548,327 @@ const closeBookingDetails = () => {
   setSelectedBooking(null);
 };
 
-// Function to handle booking cancellation
-const cancelBooking = async (bookingId) => {
-  if (!window.confirm("Are you sure you want to cancel this booking?")) {
-    return;
+// Function to show the quote modal
+const showSendQuoteModal = (booking) => {
+  setQuoteModal({
+    isOpen: true,
+    booking: booking
+  });
+};
+
+// Function to handle sending quotes with undo capability
+const handleSendQuote = (bookingId, quoteAmount) => {
+  // Close the modal
+  setQuoteModal({
+    isOpen: false,
+    booking: null
+  });
+  
+  // Set quote sending in progress
+  setQuoteSending({
+    inProgress: true,
+    bookingId: bookingId,
+    quoteAmount: quoteAmount,
+    timer: setTimeout(() => {
+      // This will execute after the grace period
+      sendQuoteEmail(bookingId, quoteAmount);
+    }, 0) // 10 second grace period
+  });
+  
+  // Show toast notification with undo option
+  const notification = document.createElement('div');
+  notification.className = 'fixed bottom-4 right-4 bg-blue-600 text-white p-4 rounded-lg shadow-lg z-50 flex items-center';
+  notification.innerHTML = `
+    <div class="mr-3">
+      <p class="font-medium">Quote £${quoteAmount} will be sent in 10 seconds</p>
+      <p class="text-sm">Click undo to cancel</p>
+    </div>
+    <button id="undoQuoteBtn" class="bg-white text-blue-600 px-3 py-1 rounded hover:bg-blue-100">
+      Undo
+    </button>
+  `;
+  document.body.appendChild(notification);
+  
+  // Add event listener to undo button
+  document.getElementById('undoQuoteBtn').addEventListener('click', () => {
+    // Clear the timeout
+    if (quoteSending.timer) {
+      clearTimeout(quoteSending.timer);
+    }
+    
+    // Reset quote sending state
+    setQuoteSending({
+      inProgress: false,
+      bookingId: null,
+      timer: null,
+      quoteAmount: null
+    });
+    
+    // Remove the notification
+    document.body.removeChild(notification);
+    
+    // Show success message
+    const undoMessage = document.createElement('div');
+    undoMessage.innerHTML = '<div class="fixed top-0 right-0 m-4 p-4 bg-green-500 text-white rounded shadow-lg transition-opacity duration-500">Quote cancelled!</div>';
+    document.body.appendChild(undoMessage);
+    
+    // Remove the message after a delay
+    setTimeout(() => {
+      undoMessage.querySelector('div').style.opacity = '0';
+      setTimeout(() => document.body.removeChild(undoMessage), 500);
+    }, 3000);
+  });
+  
+  // Remove the notification after the grace period
+  setTimeout(() => {
+    if (document.body.contains(notification)) {
+      document.body.removeChild(notification);
+    }
+  }, 10000);
+};
+
+const sendQuoteEmail = async (bookingId, quoteAmount) => {
+  try {
+    // Find the booking
+    const booking = bookings.find(b => b.id === bookingId);
+    if (!booking) {
+      console.error("Booking not found for sending quote");
+      return;
+    }
+    const now = new Date();
+    
+    console.log(`Sending quote of £${quoteAmount} to ${booking.customerName} (${booking.customerEmail})`);
+    const formattedQuoteDate = `${now.getDate()} ${monthNames[now.getMonth()]} ${now.getFullYear()}`;
+
+    // Show loading indicator
+    const loadingMessage = document.createElement('div');
+    loadingMessage.innerHTML = `<div class="fixed top-0 right-0 m-4 p-4 bg-blue-500 text-white rounded shadow-lg">Processing quote...</div>`;
+    document.body.appendChild(loadingMessage);
+    
+    try {
+      // Create a single consolidated data object for Zapier
+      const zapierData = {
+        customerName: booking.customerName,
+        customerEmail: booking.customerEmail,
+        customerPhone: booking.customerPhone,
+        bookingDate: booking.displayDate,
+        bookingTime: booking.displayTimeRange || booking.time,
+        orderId: booking.id,
+        serviceType: booking.service || "Cleaning Service",
+        quoteAmount: quoteAmount,
+        stripeQuoteAmount: quoteAmount * 100,
+        quoteDate: formattedQuoteDate,
+        submittedAt: new Date().toISOString(),
+        bedrooms: booking.bedrooms,
+        livingRooms: booking.livingRooms,
+        kitchens: booking.kitchens,
+        bathrooms: booking.bathrooms,
+        cleanliness: booking.cleanliness,
+        additionalRooms: booking.additionalRooms,
+        addOns: booking.addOns,
+        estimatedHours: booking.estimatedHours,
+        totalPrice: booking.totalPrice,
+        additionalInfo: booking.additionalInfo || "None provided"
+      };
+      
+      console.log('Sending consolidated data to Zapier:', zapierData);
+      
+      // Single Zapier call
+      await fetch('https://hooks.zapier.com/hooks/catch/22652608/2p0nwcm/', {
+        method: 'POST',
+        mode: "no-cors",
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(zapierData)
+      });
+      
+      console.log('Quote request sent to Zapier');
+      
+      // UPDATE FIREBASE WITH QUOTE INFORMATION
+      try {
+        // Find the date document
+        const dateRef = doc(db, "unavailability", booking.date);
+        const dateDoc = await getDoc(dateRef);
+        
+        if (dateDoc.exists()) {
+          const dateData = dateDoc.data();
+          const updatedBookedSlots = { ...dateData.bookedTimeSlots };
+          
+          // Update the booking information in each time slot for this booking
+          Object.keys(updatedBookedSlots).forEach(timeSlot => {
+            const slotData = updatedBookedSlots[timeSlot];
+            if (slotData.bookingId === booking.id) {
+              // Add quote information to the time slot data
+              updatedBookedSlots[timeSlot] = {
+                ...slotData,
+                quoteSent: true,
+                quoteAmount: quoteAmount,
+                quoteSentDate: new Date().toISOString(),
+                quoteStatus: 'sent'
+              };
+            }
+          });
+          
+          // Update Firebase with the new data
+          await setDoc(dateRef, {
+            ...dateData,
+            bookedTimeSlots: updatedBookedSlots
+          });
+          
+          console.log('Quote information saved to Firebase');
+          
+          // Update local state to immediately reflect the change
+          setTimeSlotData(prev => ({
+            ...prev,
+            [booking.date]: updatedBookedSlots
+          }));
+          
+          // Refresh bookings to show the updated quote status
+          await fetchBookings();
+        }
+      } catch (firebaseError) {
+        console.error("Error updating Firebase with quote info:", firebaseError);
+        // Don't fail the whole process if Firebase update fails
+      }
+      
+      // Remove loading message
+      document.body.removeChild(loadingMessage);
+      
+      // Show success message 
+      const successMessage = document.createElement('div');
+      successMessage.innerHTML = `<div class="fixed top-0 right-0 m-4 p-4 bg-green-500 text-white rounded shadow-lg transition-opacity duration-500">
+        Quote of £${quoteAmount} sent successfully! A payment link has been sent to the customer's email.
+      </div>`;
+      document.body.appendChild(successMessage);
+      
+      // Remove the message after a delay
+      setTimeout(() => {
+        successMessage.querySelector('div').style.opacity = '0';
+        setTimeout(() => document.body.removeChild(successMessage), 500);
+      }, 3000);
+      
+    } catch (zapError) {
+      console.error("Error with Zapier automation:", zapError);
+      
+      // Show error message
+      const errorMessage = document.createElement('div');
+      errorMessage.innerHTML = `<div class="fixed top-0 right-0 m-4 p-4 bg-red-500 text-white rounded shadow-lg transition-opacity duration-500">
+        Error sending quote: ${zapError.message}. Please try again or contact support.
+      </div>`;
+      document.body.appendChild(errorMessage);
+      
+      // Remove the message after a delay
+      setTimeout(() => {
+        errorMessage.querySelector('div').style.opacity = '0';
+        setTimeout(() => document.body.removeChild(errorMessage), 500);
+      }, 5000);
+    }
+    
+    // Reset quote sending state
+    setQuoteSending({
+      inProgress: false,
+      bookingId: null,
+      timer: null,
+      quoteAmount: null
+    });
+    
+  } catch (error) {
+    console.error("Error sending quote:", error);
+    
+    // Show error message
+    const errorMessage = document.createElement('div');
+    errorMessage.innerHTML = `<div class="fixed top-0 right-0 m-4 p-4 bg-red-500 text-white rounded shadow-lg transition-opacity duration-500">Error sending quote: ${error.message}</div>`;
+    document.body.appendChild(errorMessage);
+    
+    // Remove the message after a delay
+    setTimeout(() => {
+      errorMessage.querySelector('div').style.opacity = '0';
+      setTimeout(() => document.body.removeChild(errorMessage), 500);
+    }, 5000);
+    
+    // Reset quote sending state
+    setQuoteSending({
+      inProgress: false,
+      bookingId: null,
+      timer: null,
+      quoteAmount: null
+    });
   }
+};
+
+// First you have your showCancelBookingConfirm function:
+const showCancelBookingConfirm = (bookingId) => {
+  // Find the booking to get details
+  const bookingToCancel = bookings.find(b => b.id === bookingId);
+  if (!bookingToCancel) return;
+  
+  // Set modal state with booking details
+  setConfirmModal({
+    isOpen: true,
+    bookingId: bookingId,
+    title: 'Cancel Booking',
+    message: `Are you sure you want to cancel the booking for ${bookingToCancel.customerName} on ${bookingToCancel.displayDate}?`
+  });
+};
+
+// Add this function to your App.js file
+const notifyCancellation = async (booking, cancellationReason = "") => {
+  const now = new Date();
+    
+  const formattedCanellationDate = `${now.getDate()} ${monthNames[now.getMonth()]} ${now.getFullYear()}`;
+
+  try {
+    // Prepare the data for Zapier
+    const cancellationData = {
+      // Essential booking identification
+      orderId: booking.id || booking.orderId,
+      customerName: booking.customerName || booking.name,
+      customerEmail: booking.customerEmail || booking.email,
+      bookingDate: booking.displayDate || booking.date,
+      bookingTime: booking.displayTimeRange || booking.time,
+      
+      // Add cancellation information
+      cancellationReason: cancellationReason || "No reason provided",
+      cancellationDate: formattedCanellationDate,
+      status: "CANCELLED",
+      
+      // Include any other relevant booking details that Zapier might need
+      service: booking.service || "Cleaning Service",
+      totalPrice: booking.totalPrice || "0.00",
+      
+      // Add metadata to help Zapier routing
+      actionType: "booking_cancellation",
+      source: "admin_dashboard"
+    };
+    
+    console.log('Sending cancellation data to Zapier:', cancellationData);
+    
+    // Send the data to your Zapier webhook - create a new webhook specifically for cancellations
+    const response = await fetch('https://hooks.zapier.com/hooks/catch/22652608/2pje2gt/', {
+      method: 'POST',
+      mode: "no-cors",
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(cancellationData)
+    });
+    
+    console.log('Zapier cancellation webhook triggered');
+    
+    // We can't get a detailed response with no-cors mode
+    // But we can check if the request was sent
+    return true;
+  } catch (error) {
+    console.error('Error sending cancellation to Zapier:', error);
+    // Continue with booking cancellation process even if Zapier notification fails
+    return false;
+  }
+};
+
+// Now modify your existing cancelBooking function to include the Zapier notification
+const cancelBooking = async (bookingId, cancellationReason = "") => {
+  console.log("cancelBooking called with bookingId:", bookingId);
   
   try {
     // Find the booking to cancel
@@ -380,9 +879,19 @@ const cancelBooking = async (bookingId) => {
     }
     
     console.log("Cancelling booking:", bookingToCancel);
+
+    
+    
+    // FIRST: Notify Zapier about the cancellation
+    // This will update Trello and Google Sheets
+    await notifyCancellation(bookingToCancel, cancellationReason);
+
     
     // Reference to the date document
     const dateRef = doc(db, "unavailability", bookingToCancel.date);
+    
+    // Rest of your existing cancelBooking code
+    // [Your existing code for updating Firestore...]
     
     // Get current data
     const dateDoc = await getDoc(dateRef);
@@ -396,53 +905,58 @@ const cancelBooking = async (bookingId) => {
     
     // Handle grouped time slots
     if (bookingToCancel.timeSlots && bookingToCancel.timeSlots.length > 0) {
-      console.log("Cancelling grouped booking with timeSlots:", bookingToCancel.timeSlots);
+      // [Your existing time slot handling code...]
       
-      // Check if we have a bookedTimeSlots object
-      if (updatedDocData.bookedTimeSlots) {
-        // Clone bookedTimeSlots to modify it
-        const updatedSlots = {...updatedDocData.bookedTimeSlots};
+      // Handle grouped time slots
+      if (bookingToCancel.timeSlots && bookingToCancel.timeSlots.length > 0) {
+        console.log("Cancelling grouped booking with timeSlots:", bookingToCancel.timeSlots);
         
-        // Remove all time slots for this booking
-        bookingToCancel.timeSlots.forEach(hour => {
-          const timeKey = `${hour}:00`;
-          console.log(`Removing time slot: ${timeKey}`);
-          delete updatedSlots[timeKey];
-        });
+        // Check if we have a bookedTimeSlots object
+        if (updatedDocData.bookedTimeSlots) {
+          // Clone bookedTimeSlots to modify it
+          const updatedSlots = {...updatedDocData.bookedTimeSlots};
+          
+          // Remove all time slots for this booking
+          bookingToCancel.timeSlots.forEach(hour => {
+            const timeKey = `${hour}:00`;
+            console.log(`Removing time slot: ${timeKey}`);
+            delete updatedSlots[timeKey];
+          });
+          
+          // Update the bookedTimeSlots property
+          updatedDocData.bookedTimeSlots = updatedSlots;
+        } else {
+          // Using direct time slot properties
+          bookingToCancel.timeSlots.forEach(hour => {
+            const timeKey = `${hour}:00`;
+            console.log(`Removing direct time slot: ${timeKey}`);
+            // Need to use deleteField() to remove a field in Firestore updates
+            updatedDocData[timeKey] = deleteField();
+          });
+        }
+      } else if (bookingToCancel.time) {
+        // Handle single time slot (for backward compatibility)
+        console.log(`Cancelling single booking for time: ${bookingToCancel.time}`);
         
-        // Update the bookedTimeSlots property
-        updatedDocData.bookedTimeSlots = updatedSlots;
-      } else {
-        // Using direct time slot properties
-        bookingToCancel.timeSlots.forEach(hour => {
-          const timeKey = `${hour}:00`;
-          console.log(`Removing direct time slot: ${timeKey}`);
-          // Need to use null to remove a field in Firestore updates
-          updatedDocData[timeKey] = deleteField();
-        });
+        if (updatedDocData.bookedTimeSlots && updatedDocData.bookedTimeSlots[bookingToCancel.time]) {
+          // Using bookedTimeSlots object
+          const updatedSlots = {...updatedDocData.bookedTimeSlots};
+          delete updatedSlots[bookingToCancel.time];
+          updatedDocData.bookedTimeSlots = updatedSlots;
+        } else {
+          // Using direct time slot property
+          updatedDocData[bookingToCancel.time] = deleteField();
+        }
       }
-    } else if (bookingToCancel.time) {
-      // Handle single time slot (for backward compatibility)
-      console.log(`Cancelling single booking for time: ${bookingToCancel.time}`);
       
-      if (updatedDocData.bookedTimeSlots && updatedDocData.bookedTimeSlots[bookingToCancel.time]) {
-        // Using bookedTimeSlots object
-        const updatedSlots = {...updatedDocData.bookedTimeSlots};
-        delete updatedSlots[bookingToCancel.time];
-        updatedDocData.bookedTimeSlots = updatedSlots;
-      } else {
-        // Using direct time slot property
-        updatedDocData[bookingToCancel.time] = deleteField();
+      // If no slots left, update fully booked status
+      const hasTimeSlots = 
+        (updatedDocData.bookedTimeSlots && Object.keys(updatedDocData.bookedTimeSlots).length > 0) ||
+        Object.keys(updatedDocData).some(key => key.includes(':00') && updatedDocData[key]);
+        
+      if (!hasTimeSlots) {
+        updatedDocData.fullyBooked = false;
       }
-    }
-    
-    // If no slots left, update fully booked status
-    const hasTimeSlots = 
-      (updatedDocData.bookedTimeSlots && Object.keys(updatedDocData.bookedTimeSlots).length > 0) ||
-      Object.keys(updatedDocData).some(key => key.includes(':00') && updatedDocData[key]);
-      
-    if (!hasTimeSlots) {
-      updatedDocData.fullyBooked = false;
     }
     
     console.log("Updated document data:", updatedDocData);
@@ -458,11 +972,30 @@ const cancelBooking = async (bookingId) => {
       closeBookingDetails();
     }
     
-    alert("Booking cancelled successfully!");
+    // Show success message
+    const successMessage = document.createElement('div');
+    successMessage.innerHTML = '<div class="fixed top-0 right-0 m-4 p-4 bg-green-500 text-white rounded shadow-lg transition-opacity duration-500">Booking cancelled successfully!</div>';
+    document.body.appendChild(successMessage);
+    
+    // Remove the message after a delay
+    setTimeout(() => {
+      successMessage.querySelector('div').style.opacity = '0';
+      setTimeout(() => document.body.removeChild(successMessage), 500);
+    }, 3000);
     
   } catch (error) {
     console.error("Error cancelling booking:", error);
-    alert("Error cancelling booking: " + error.message);
+    
+    // Show error message
+    const errorMessage = document.createElement('div');
+    errorMessage.innerHTML = `<div class="fixed top-0 right-0 m-4 p-4 bg-red-500 text-white rounded shadow-lg transition-opacity duration-500">Error: ${error.message}</div>`;
+    document.body.appendChild(errorMessage);
+    
+    // Remove the message after a delay
+    setTimeout(() => {
+      errorMessage.querySelector('div').style.opacity = '0';
+      setTimeout(() => document.body.removeChild(errorMessage), 500);
+    }, 5000);
   }
 };
 
@@ -676,6 +1209,12 @@ return (
     Bookings
   </button>
   <button 
+    onClick={() => setActiveTab("staff")}
+    className={`px-6 py-2 rounded ${activeTab === "staff" ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-700"}`}
+  >
+    Staff
+  </button>
+  <button 
     onClick={() => window.location.href = '/booking/home'}
     className="px-6 py-2 rounded bg-gray-200 text-gray-700"
   >
@@ -803,18 +1342,69 @@ return (
                           {booking.id}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                {/* Add Send Quote button that changes to Undo during grace period */}
+  {/* Check if quote has been sent */}
+{/* Check if quote has been sent */}
+{booking.quoteSent ? (
+  <button 
+    disabled
+    className="text-gray-400 bg-gray-100 cursor-not-allowed mr-4 px-3 py-1 rounded"
+  >
+    Quote Sent
+  </button>
+) : quoteSending.inProgress && quoteSending.bookingId === booking.id ? (
+  <button 
+    onClick={() => {
+      // Clear the timeout
+      if (quoteSending.timer) {
+        clearTimeout(quoteSending.timer);
+      }
+      
+      // Reset quote sending state
+      setQuoteSending({
+        inProgress: false,
+        bookingId: null,
+        timer: null,
+        quoteAmount: null
+      });
+      
+      // Show cancelled message
+      const cancelMessage = document.createElement('div');
+      cancelMessage.innerHTML = '<div class="fixed top-0 right-0 m-4 p-4 bg-green-500 text-white rounded shadow-lg transition-opacity duration-500">Quote cancelled!</div>';
+      document.body.appendChild(cancelMessage);
+      
+      // Remove the message after a delay
+      setTimeout(() => {
+        cancelMessage.querySelector('div').style.opacity = '0';
+        setTimeout(() => document.body.removeChild(cancelMessage), 500);
+      }, 3000);
+    }}
+    className="text-orange-600 hover:text-orange-900 mr-4"
+  >
+    Undo Quote (£{quoteSending.quoteAmount})
+  </button>
+) : (
+  <button 
+    onClick={() => showSendQuoteModal(booking)}
+    className="text-green-600 hover:text-green-900 mr-4"
+  >
+    Send Quote
+  </button>
+)}
                           <button 
                             onClick={() => viewBookingDetails(booking)}
-                            className="text-blue-600 hover:text-blue-900 mr-4"
+                            className="text-white-600 hover:text-white-900 mr-4"
                           >
                             View
                           </button>
+                          <GenerateChecklistButton booking={booking} />
+
                           <button 
-                            onClick={() => cancelBooking(booking.id)}
-                            className="text-red-600 hover:text-red-900"
-                          >
-                            Cancel
-                          </button>
+  onClick={() => showCancelBookingConfirm(booking.id)}
+  className="text-red-600 hover:text-red-900"
+>
+  Cancel
+</button>
                         </td>
                       </tr>
                     );
@@ -858,6 +1448,7 @@ return (
                     <p className="mb-2"><span className="font-medium">Name:</span> {selectedBooking.customerName}</p>
                     <p className="mb-2"><span className="font-medium">Email:</span> {selectedBooking.customerEmail}</p>
                     <p className="mb-2"><span className="font-medium">Phone:</span> {selectedBooking.customerPhone}</p>
+                    <p className="mb-2"><span className="font-medium">Address:</span> {selectedBooking.address}</p>
                   </div>
                 </div>
                 
@@ -901,16 +1492,32 @@ return (
                         <p className="mt-1 text-gray-700">{selectedBooking.additionalInfo}</p>
                       </div>
                     )}
+                    {/* In the Booking Details Modal - add this section after the service details or customer information */}
+{selectedBooking.quoteSent && (
+  <div className="mt-6">
+    <h3 className="text-lg font-semibold mb-2 text-blue-600">Quote Information</h3>
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <p className="mb-1"><span className="font-medium">Quote Amount:</span> £{selectedBooking.quoteAmount}</p>
+      <p className="mb-1"><span className="font-medium">Quote Sent Date:</span> {selectedBooking.quoteSentDate ? new Date(selectedBooking.quoteSentDate).toLocaleDateString('en-GB', { 
+        day: 'numeric', 
+        month: 'long', 
+        year: 'numeric' 
+      }) : 'N/A'}</p>
+      <p className="mb-1"><span className="font-medium">Status:</span> <span className="text-green-600 font-medium">Sent</span></p>
+    </div>
+  </div>
+)}
                   </div>
+                  
                 )}
                 
                 <div className="mt-8 flex justify-end">
-                  <button 
-                    onClick={() => cancelBooking(selectedBooking.id)}
-                    className="bg-red-600 text-white px-6 py-2 rounded hover:bg-red-700 transition duration-200"
-                  >
-                    Cancel Booking
-                  </button>
+                <button 
+  onClick={() => showCancelBookingConfirm(selectedBooking.id)}
+  className="bg-red-600 text-white px-6 py-2 rounded hover:bg-red-700 transition duration-200"
+>
+  Cancel Booking
+</button>
                 </div>
               </div>
             </div>
@@ -1035,6 +1642,7 @@ return (
               }}
             />
           </div>
+          
         </div>
       ) : activeTab === "admin" ? (
         // Enhanced Admin View with Time Slot Management
@@ -1121,7 +1729,257 @@ return (
             </div>
           </div>
         </div>
+      ) : activeTab === "staff" ? (
+        // Staff Management View
+        <div className="container max-w-6xl mx-auto">
+          <h1 className="text-3xl font-bold text-gray-800 mb-6">Staff Management</h1>
+          
+          {/* Add Staff Button */}
+          <div className="mb-6">
+            <button
+              onClick={() => setShowAddStaffModal(true)}
+              className="bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700 transition duration-200"
+            >
+              Add Staff Member
+            </button>
+          </div>
+          
+          {/* Staff List */}
+          <div className="bg-white rounded-lg shadow-md overflow-hidden">
+            {staffLoading ? (
+              <div className="p-8 text-center">
+                <div className="spinner inline-block mr-2"></div>
+                <span>Loading staff...</span>
+              </div>
+            ) : staff.length === 0 ? (
+              <div className="p-8 text-center text-gray-500">
+                <p>No staff members found. Add your first staff member.</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Contact</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Availability</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {staff.map((staffMember) => (
+                      <tr key={staffMember.id}>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="text-sm font-medium text-gray-900">{staffMember.name}</div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="text-sm text-gray-900">{staffMember.email}</div>
+                          <div className="text-sm text-gray-500">{staffMember.phone}</div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
+                            staffMember.active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                          }`}>
+                            {staffMember.active ? 'Active' : 'Inactive'}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="text-sm text-gray-900">
+                            {Object.entries(staffMember.availability).map(([day, hours]) => (
+                              <div key={day} className="mb-1">
+                                <span className="font-medium capitalize">{day}:</span> {
+                                  hours.available ? `${hours.startTime} - ${hours.endTime}` : 'Not Available'
+                                }
+                              </div>
+                            ))}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                          <button 
+                            onClick={() => editStaff(staffMember)}
+                            className="text-blue-600 hover:text-blue-900 mr-4"
+                          >
+                            Edit
+                          </button>
+                          <button 
+                            onClick={() => deleteStaff(staffMember.id)}
+                            className="text-red-600 hover:text-red-900"
+                          >
+                            Delete
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+          
+          {/* Add/Edit Staff Modal */}
+          {showAddStaffModal && (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+              <div className="bg-white rounded-lg shadow-lg w-full max-w-3xl max-h-[90vh] overflow-auto">
+                <div className="p-6">
+                  <div className="flex justify-between items-center mb-6">
+                    <h2 className="text-2xl font-bold">{editingStaff ? 'Edit Staff Member' : 'Add Staff Member'}</h2>
+                    <button 
+                      onClick={() => {
+                        setShowAddStaffModal(false);
+                        setEditingStaff(null);
+                        setStaffForm({
+                          name: '',
+                          email: '',
+                          phone: '',
+                          availability: {
+                            monday: { available: true, startTime: '07:00', endTime: '20:00' },
+                            tuesday: { available: true, startTime: '07:00', endTime: '20:00' },
+                            wednesday: { available: true, startTime: '07:00', endTime: '20:00' },
+                            thursday: { available: true, startTime: '07:00', endTime: '20:00' },
+                            friday: { available: true, startTime: '07:00', endTime: '20:00' },
+                            saturday: { available: true, startTime: '07:00', endTime: '20:00' },
+                            sunday: { available: false, startTime: '07:00', endTime: '20:00' }
+                          },
+                          active: true
+                        });
+                      }}
+                      className="text-gray-500 hover:text-gray-700"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+                  
+                  <form onSubmit={saveStaff}>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
+                        <input
+                          type="text"
+                          name="name"
+                          value={staffForm.name}
+                          onChange={handleStaffFormChange}
+                          className="w-full p-2 border rounded-lg"
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                        <input
+                          type="email"
+                          name="email"
+                          value={staffForm.email}
+                          onChange={handleStaffFormChange}
+                          className="w-full p-2 border rounded-lg"
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
+                        <input
+                          type="tel"
+                          name="phone"
+                          value={staffForm.phone}
+                          onChange={handleStaffFormChange}
+                          className="w-full p-2 border rounded-lg"
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                        <div className="flex items-center mt-2">
+                          <input
+                            type="checkbox"
+                            name="active"
+                            checked={staffForm.active}
+                            onChange={handleStaffFormChange}
+                            className="mr-2"
+                          />
+                          <span>Active</span>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    <div className="mb-6">
+                      <h3 className="text-lg font-semibold mb-3">Availability</h3>
+                      <div className="space-y-3">
+                        {Object.entries(staffForm.availability).map(([day, hours]) => (
+                          <div key={day} className="flex items-center space-x-4">
+                            <div className="w-24">
+                              <span className="capitalize font-medium">{day}</span>
+                            </div>
+                            <div className="flex items-center">
+                              <input
+                                type="checkbox"
+                                checked={hours.available}
+                                onChange={(e) => handleAvailabilityChange(day, 'available', e.target.checked)}
+                                className="mr-2"
+                              />
+                              <span className="mr-4">Available</span>
+                            </div>
+                            {hours.available && (
+                              <>
+                                <input
+                                  type="time"
+                                  value={hours.startTime}
+                                  onChange={(e) => handleAvailabilityChange(day, 'startTime', e.target.value)}
+                                  className="border rounded px-2 py-1"
+                                />
+                                <span>to</span>
+                                <input
+                                  type="time"
+                                  value={hours.endTime}
+                                  onChange={(e) => handleAvailabilityChange(day, 'endTime', e.target.value)}
+                                  className="border rounded px-2 py-1"
+                                />
+                              </>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    
+                    <div className="flex justify-end space-x-3">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowAddStaffModal(false);
+                          setEditingStaff(null);
+                        }}
+                        className="px-4 py-2 bg-gray-200 text-gray-800 rounded hover:bg-gray-300 transition duration-200"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition duration-200"
+                      >
+                        {editingStaff ? 'Update Staff' : 'Add Staff'}
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
       ) : null }
+      {/* Confirmation Modal */}
+      <ConfirmModal
+  isOpen={confirmModal.isOpen}
+  onClose={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+  onConfirm={(reason) => cancelBooking(confirmModal.bookingId, reason)}
+  title={confirmModal.title}
+  message={confirmModal.message}
+/>
+<QuoteModal
+  isOpen={quoteModal.isOpen}
+  onClose={() => setQuoteModal({ isOpen: false, booking: null })}
+  onSendQuote={(amount) => handleSendQuote(quoteModal.booking?.id, amount)}
+  booking={quoteModal.booking}
+/>
     </div>
   );
 }

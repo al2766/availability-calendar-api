@@ -360,6 +360,11 @@ body {
   background-color: #3ca142 !important;
   color: white !important;
 }
+/* Hover effect */
+.booking-calendar .react-calendar__tile.selected:hover {
+  background-color: #0071bc(darken 5%) !important;
+  color: white !important;
+}
 
 
 /* Time Slot Styles */

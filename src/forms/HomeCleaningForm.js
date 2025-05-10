@@ -4,6 +4,8 @@ import Calendar from "react-calendar";
 import "react-calendar/dist/Calendar.css";
 import "../App.css";
 import useBookingLogic from "../hooks/useBookingLogic";
+import AddressLookup from "../components/AddressLookup";
+import { handleFormSubmission } from "../utils/bookingFormUtils";
 
 function HomeCleaningForm() {
   // Use the shared booking logic
@@ -19,7 +21,15 @@ function HomeCleaningForm() {
     kitchens: "",
     bathrooms: "",
     cleanliness: "",
-    additionalInfo: ""
+    additionalInfo: "",
+    // Add address fields to formData
+    address: {
+      line1: "",
+      line2: "",
+      town: "",
+      county: "",
+      postcode: ""
+    }
   });
   
   const [additionalRooms, setAdditionalRooms] = useState([]);
@@ -49,6 +59,28 @@ function HomeCleaningForm() {
       ...prev,
       [name]: value
     }));
+  };
+  
+  // Handle address selection from the AddressLookup component
+  const handleAddressSelect = (selectedAddress) => {
+    if (!selectedAddress) return;
+    
+    // Format the address for display and storage
+    const formattedAddress = {
+      line1: selectedAddress.line1 || "",
+      line2: selectedAddress.line2 || "",
+      town: selectedAddress.town || "",
+      county: selectedAddress.county || "",
+      postcode: selectedAddress.postcode || "" // Make sure postcode is included
+    };
+    
+    // Save to form data
+    setFormData(prev => ({
+      ...prev,
+      address: formattedAddress
+    }));
+    
+    console.log("Address selected with postcode:", formattedAddress.postcode);
   };
   
   // Handle checkbox changes for additional rooms
@@ -150,198 +182,45 @@ function HomeCleaningForm() {
     });
   };
   
-  // Handle form submission with race condition prevention
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    
-    if (!booking.selectedDate) {
-      alert("Please select a date from the calendar.");
-      return;
-    }
-    
-    if (!booking.selectedTime) {
-      alert("Please select a time slot.");
-      return;
-    }
-    
-    // Get submit button
-    const submitButton = document.getElementById("submit-btn");
-    submitButton.disabled = true;
-    submitButton.innerHTML = `<span class="spinner"></span> Submitting...`;
-    
-    try {
-      // Generate order ID
-      const orderId = "LUX" + Date.now().toString().slice(-6);
-      const serviceType = "Home Cleaning"
-      
-      // Collect selected add-ons and additional rooms
-      const selectedAddOns = addOns.map(addon => addon.value);
-      
-      // Prepare booking info with service type
-      const bookingInfo = {
-        service: "Home Cleaning", // Specify service type
-        email: formData.email,
-        phone: formData.phone,
-        name: formData.name,
-        orderId: orderId,
-        timestamp: new Date().toISOString(),
-        bedrooms: formData.bedrooms === "0" ? "0 (Studio)" : formData.bedrooms,
-        livingRooms: formData.livingRooms,
-        kitchens: formData.kitchens,
-        bathrooms: formData.bathrooms,
-        cleanliness: formData.cleanliness,
-        additionalRooms: additionalRooms.join(", ") || "None",
-        addOns: selectedAddOns.join(", ") || "None",
-        totalPrice: priceBreakdown.totalPrice,
-        estimatedHours: priceBreakdown.estimatedHours,
-        additionalInfo: formData.additionalInfo ?? null
-      };
-      
-      // Prepare form data for email template
-      const templateParams = {
-        service: "Home Cleaning", // Add service type
-        name: formData.name,
-        email: formData.email,
-        phone: formData.phone,
-        date: booking.formatDisplayDate(booking.selectedDate).replace("Selected Date: ", ""),
-        time: booking.selectedTime,
-        bedrooms: formData.bedrooms === "0" ? "0 (Studio)" : formData.bedrooms,
-        livingRooms: formData.livingRooms,
-        kitchens: formData.kitchens,
-        bathrooms: formData.bathrooms,
-        cleanliness: formData.cleanliness,
-        additionalRooms: additionalRooms.join(", ") || "None",
-        addOns: selectedAddOns.join(", ") || "None",
-        totalPrice: `£${priceBreakdown.totalPrice}`,
-        estimatedHours: `${priceBreakdown.estimatedHours} hour(s)`,
-        order_id: orderId,
-        additionalInfo: formData.additionalInfo || "None provided"
-      };
-      
-      // FIRST: Update the time slots in Firebase
-      try {
-        // Update time slots for this booking
-        const { updatedBookedSlots, fullyBooked } = await booking.updateTimeSlots(
-          booking.selectedDate, 
-          booking.selectedTime, 
-          priceBreakdown.estimatedHours,
-          bookingInfo
-        );
-      } catch (error) {
-        console.error("Error updating time slots:", error);
-        // Continue with the booking process even if there was an error updating time slots
+  // Reset form function
+  const resetForm = () => {
+    setFormData({
+      name: "",
+      email: "",
+      phone: "",
+      bedrooms: "",
+      livingRooms: "",
+      kitchens: "",
+      bathrooms: "",
+      cleanliness: "",
+      additionalInfo: "",
+      address: {
+        line1: "",
+        line2: "",
+        town: "",
+        county: "",
+        postcode: ""
       }
-
-     
-    // Use this function in both HomeCleaningForm.js and OfficeCleaningForm.js
-const notifyZapier = async () => {
-    try {
-      // Prepare the data with proper flat structure for Zapier
-      const zapierData = {
-        // Put important fields at the top level for easy access in Zapier
-        customerName: formData.name,
-        customerEmail: formData.email,
-        customerPhone: formData.phone,
-        bookingDate: booking.formatDisplayDate(booking.selectedDate).replace("Selected Date: ", ""),
-        bookingTime: booking.selectedTime,
-        orderId: orderId,
-        serviceType: serviceType, // "Home Cleaning" or "Office Cleaning"
-        estimatedHours: priceBreakdown.estimatedHours,
-        totalPrice: priceBreakdown.totalPrice,
-        additionalInfo: formData.additionalInfo || "None provided",
-        submittedAt: new Date().toISOString(),
-        
-      
-          // For Home Cleaning Form
-          bedrooms: formData.bedrooms,
-          livingRooms: formData.livingRooms,
-          kitchens: formData.kitchens,
-          bathrooms: formData.bathrooms,
-          cleanliness: formData.cleanliness,
-          additionalRooms: additionalRooms?.join(", ") || "None",
-          addOns: selectedAddOns?.join(", ") || "None"
-          
-          // For Office Cleaning Form, include these fields instead (in OfficeCleaningForm.js)
-          
-        //   officeRooms: formData.officeRooms,
-        //   officeSize: officeSizeText,
-        //   meetingRooms: formData.meetingRooms,
-        //   meetingRoomSize: meetingRoomSizeText,
-        //   kitchens: formData.kitchens,
-        //   bathrooms: formData.bathrooms,
-        //   cleanliness: formData.cleanliness,
-        //   additionalAreas: additionalAreas?.join(", ") || "None",
-        //   addOns: selectedAddOns?.join(", ") || "None"
-          
-        
-      };
-      
-      console.log('Sending data to Zapier:', zapierData);
-      
-      // Send booking data to Zapier webhook
-      const response = await fetch('https://hooks.zapier.com/hooks/catch/22652608/2pozxou/', {
-        method: 'POST',
-        mode: "no-cors",
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(zapierData)
-      });
-      
-      if (response.status) {
-        console.log('Zapier webhook triggered successfully');
-      } else {
-        console.error('Zapier webhook failed with status:', response.status);
-      }
-    } catch (error) {
-      console.error('Error sending data to Zapier:', error);
-      // Continue with booking process even if Zapier fails
-    }
+    });
+    setAdditionalRooms([]);
+    setAddOns([]);
+    calculatePrice();
   };
   
-  // Call the function in your handleSubmit function:
-  await notifyZapier();
-      
-      // SECOND: Send email confirmation
-      if (window.emailjs) {
-        await window.emailjs.send('service_04pgv28', 'template_0cbdpse', templateParams);
-        
-        submitButton.innerHTML = "Booking Confirmed!";
-        alert("Your booking has been confirmed! Check your email for details.");
-        
-        // Reset form
-        booking.setSelectedDate(null);
-        booking.setSelectedTime("");
-        setFormData({
-          name: "",
-          email: "",
-          phone: "",
-          bedrooms: "",
-          livingRooms: "",
-          kitchens: "",
-          bathrooms: "",
-          cleanliness: "",
-          additionalInfo: ""
-        });
-        setAdditionalRooms([]);
-        setAddOns([]);
-        calculatePrice();
-        
-        // Re-enable submit button after delay
-        setTimeout(() => {
-          submitButton.innerHTML = "Book Now";
-          submitButton.disabled = false;
-        }, 3000);
-      } else {
-        console.error("EmailJS not loaded");
-        throw new Error("Email service not available");
-      }
-    } catch (error) {
-      console.error("Error submitting booking:", error);
-      submitButton.innerHTML = "Book Now";
-      submitButton.disabled = false;
-      alert("Sorry, there was a problem submitting your booking. Please try again.");
-    }
+  // Handle form submission using the shared utility
+  const handleSubmit = (e) => {
+    handleFormSubmission(
+      e,
+      booking,
+      booking.selectedDate,
+      booking.selectedTime,
+      formData,
+      additionalRooms,
+      addOns,
+      priceBreakdown,
+      "Home Cleaning",
+      resetForm
+    );
   };
 
   return (
@@ -456,6 +335,9 @@ const notifyZapier = async () => {
                 required 
               />
             </div>
+            
+            {/* Address Lookup Component */}
+            <AddressLookup onAddressSelect={handleAddressSelect} />
             
             {/* Property Details */}
             <div className="fs-section-title text-lg text-blue-600 font-medium mb-2 pb-2 border-b">
