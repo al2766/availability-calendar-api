@@ -1,9 +1,13 @@
 // src/hooks/useBookingLogic.js
 import { useState, useEffect } from "react";
+// Near the top of useBookingLogic.js with your other imports
+import { formatDateLocal, formatDisplayDate, hasConsecutiveAvailableHours, updateTimeSlots } from "../utils/bookingFormUtils";
 import { collection, getDocs, doc, getDoc, setDoc } from "firebase/firestore";
 import { db } from "../firebase";
 
 export default function useBookingLogic(serviceType) {
+
+  
   // Unavailability calendar states
   const [unavailableDates, setUnavailableDates] = useState(new Set());
   const [loading, setLoading] = useState(true);
@@ -12,6 +16,9 @@ export default function useBookingLogic(serviceType) {
   // Booking form states
   const [selectedDate, setSelectedDate] = useState(null);
   const [selectedTime, setSelectedTime] = useState("");
+  const [staffLimitedSelected, setStaffLimitedSelected] = useState(false);
+
+  
   
   // Time slots
   const [availableTimeSlots, setAvailableTimeSlots] = useState([]);
@@ -19,6 +26,41 @@ export default function useBookingLogic(serviceType) {
   // Navigation states
   const [currentMonth, setCurrentMonth] = useState(new Date().getMonth());
   const [currentYear, setCurrentYear] = useState(new Date().getFullYear());
+
+  // Cache for settings and staff data
+const [availabilitySettings, setAvailabilitySettings] = useState(null);
+
+
+const [staffCache, setStaffCache] = useState(null);
+
+// Add this effect to load settings and staff data once
+useEffect(() => {
+  const loadSettingsAndStaff = async () => {
+    // Load settings
+    const settingsDoc = await getDoc(doc(db, "settings", "availability"));
+    const settings = settingsDoc.exists() ? settingsDoc.data() : {
+      useStaffAvailability: false,
+      allDatesAvailable: false,
+      minimumNoticeHours: 0,
+      bufferTimeBetweenBookings: 0,
+      assignTwoCleanersAfterHours: 4,
+      maxConcurrentBookings: 1,
+      maxJobsPerCleaner: 1
+    };
+    setAvailabilitySettings(settings);
+    
+    // Load staff if needed
+    if (settings.useStaffAvailability) {
+      const staffSnapshot = await getDocs(collection(db, "staff"));
+      const activeStaff = staffSnapshot.docs
+        .map(doc => ({ id: doc.id, ...doc.data() }))
+        .filter(staff => staff.active);
+      setStaffCache(activeStaff);
+    }
+  };
+  
+  loadSettingsAndStaff();
+}, []);
   
   // Month names for date formatting
   const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -64,76 +106,156 @@ export default function useBookingLogic(serviceType) {
     return hour <= currentHour;
   };
 
-  const fetchUnavailability = async () => {
-    try {
-      console.log("Starting fetchUnavailability...");
+// In useBookingLogic.js - replace the existing fetchUnavailability with this:
+const fetchUnavailability = async () => {
+  try {
+    console.log("Starting fetchUnavailability...");
+    
+    // First, check availability settings
+    const settingsDoc = await getDoc(doc(db, "settings", "availability"));
+    const settings = settingsDoc.exists() ? settingsDoc.data() : { 
+      useStaffAvailability: false,
+      allDatesAvailable: false
+    };
+    
+    // Cache the settings for use in generateTimeSlots
+    // Add this line to save settings for later use
+    setAvailabilitySettings(settings);
+    
+    // If all dates are available, skip other checks
+    if (settings.allDatesAvailable) {
+      console.log("All dates available setting is ON - showing all dates as available");
+      setUnavailableDates(new Set()); // Empty set = all dates available
+      setTimeSlotData({});
+      setLoading(false);
+      return;
+    }
+    
+    // Start with unavailable dates from bookings
+    const snapshot = await getDocs(collection(db, "unavailability"));
+    const unavailableDatesSet = new Set();
+    const timeSlotDataObj = {};
+    
+    // First load explicitly unavailable dates
+    snapshot.docs.forEach((doc) => {
+      const dateStr = doc.id;
+      const data = doc.data();
       
-      // Get all documents from the unavailability collection
-      const snapshot = await getDocs(collection(db, "unavailability"));
-      const unavailableDatesSet = new Set();
-      const timeSlotDataObj = {};
-      
-      snapshot.docs.forEach((doc) => {
-        const dateStr = doc.id;
-        const data = doc.data();
+      if (data.fullyBooked === true || data.unavailable === true) {
+        unavailableDatesSet.add(dateStr);
+      } else {
+        // Process individual time slots
+        const bookedTimeSlots = {};
         
-        console.log(`Processing date: ${dateStr}`, data);
-        
-        // Check for explicitly fully booked dates
-        if (data.fullyBooked === true) {
-          console.log(`Date ${dateStr} is explicitly marked as fully booked`);
-          unavailableDatesSet.add(dateStr);
-        } else if (data.unavailable === true) {
-          // Legacy format support
-          console.log(`Date ${dateStr} has the legacy 'unavailable' flag`);
-          unavailableDatesSet.add(dateStr);
-        } else {
-          // Process individual time slots
-          // Extract booked time slots from the document
-          const bookedTimeSlots = {};
-          
-          // Check if we have time slots as direct properties (7:00, 8:00, etc.)
-          let hasDirectTimeSlots = false;
-          for (let hour = 7; hour <= 20; hour++) {
-            const timeKey = `${hour}:00`;
-            if (data[timeKey]) {
-              bookedTimeSlots[timeKey] = data[timeKey];
-              hasDirectTimeSlots = true;
-            }
-          }
-          
-          // If no direct time slots found, check for bookedTimeSlots object
-          if (!hasDirectTimeSlots && data.bookedTimeSlots) {
-            Object.assign(bookedTimeSlots, data.bookedTimeSlots);
-          }
-          
-          // Store the time slots for this date
-          timeSlotDataObj[dateStr] = bookedTimeSlots;
-          
-          // Only check consecutive hours if there are actually booked slots
-          if (Object.keys(bookedTimeSlots).length > 0) {
-            // Check if there are at least 2 consecutive hours available
-            const hasEnoughConsecutiveHours = checkConsecutiveAvailableHours(bookedTimeSlots);
-            console.log(`Date ${dateStr} has enough consecutive hours: ${hasEnoughConsecutiveHours}`);
-            
-            if (!hasEnoughConsecutiveHours) {
-              unavailableDatesSet.add(dateStr);
-            }
+        // Check if we have time slots as direct properties
+        let hasDirectTimeSlots = false;
+        for (let hour = 7; hour <= 20; hour++) {
+          const timeKey = `${hour}:00`;
+          if (data[timeKey]) {
+            bookedTimeSlots[timeKey] = data[timeKey];
+            hasDirectTimeSlots = true;
           }
         }
-      });
+        
+        // If no direct time slots found, check for bookedTimeSlots object
+        if (!hasDirectTimeSlots && data.bookedTimeSlots) {
+          Object.assign(bookedTimeSlots, data.bookedTimeSlots);
+        }
+        
+        // Store the time slots for this date
+        timeSlotDataObj[dateStr] = bookedTimeSlots;
+        
+        // Check if there are at least 2 consecutive hours available
+        if (Object.keys(bookedTimeSlots).length > 0) {
+          const hasEnoughConsecutiveHours = checkConsecutiveAvailableHours(bookedTimeSlots);
+          if (!hasEnoughConsecutiveHours) {
+            unavailableDatesSet.add(dateStr);
+          }
+        }
+      }
+    });
+    
+    // If using staff availability, check staff schedules
+    if (settings.useStaffAvailability) {
+      console.log("Using staff availability to determine available dates");
       
-      console.log("Unavailable dates:", Array.from(unavailableDatesSet));
-      console.log("Time slot data:", timeSlotDataObj);
+      // Get active staff members
+      const staffSnapshot = await getDocs(collection(db, "staff"));
+      const activeStaff = staffSnapshot.docs
+        .map(doc => ({ id: doc.id, ...doc.data() }))
+        .filter(staff => staff.active);
       
-      setUnavailableDates(unavailableDatesSet);
-      setTimeSlotData(timeSlotDataObj);
-    } catch (error) {
-      console.error("Error fetching unavailability:", error);
-    } finally {
-      setLoading(false);
+      // Cache the staff for use in generateTimeSlots
+      // Add this line to save staff data for later use
+      setStaffCache(activeStaff);
+      
+      // If no active staff, mark all dates as unavailable
+      if (activeStaff.length === 0) {
+        console.log("No active staff - all dates unavailable");
+        
+        // Generate unavailable dates for the next 90 days
+        const today = new Date();
+        for (let i = 0; i < 90; i++) {
+          const date = new Date(today);
+          date.setDate(today.getDate() + i);
+          unavailableDatesSet.add(formatDateLocal(date));
+        }
+      } else {
+        // Create a map of which days of the week have staff available
+        const daysWithStaff = {
+          'sunday': false,
+          'monday': false,
+          'tuesday': false,
+          'wednesday': false,
+          'thursday': false,
+          'friday': false,
+          'saturday': false
+        };
+        
+        // Check which days have at least one staff member available
+        activeStaff.forEach(staff => {
+          Object.entries(staff.availability || {}).forEach(([day, schedule]) => {
+            if (schedule.available) {
+              daysWithStaff[day] = true;
+            }
+          });
+        });
+        
+        console.log("Days with staff available:", daysWithStaff);
+        
+        // Mark dates as unavailable if no staff works on that day
+        const today = new Date();
+        const daysOfWeek = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+        
+        // Check the next 90 days
+        for (let i = 0; i < 90; i++) {
+          const date = new Date(today);
+          date.setDate(today.getDate() + i);
+          const dayStr = formatDateLocal(date);
+          
+          // Skip if already marked as unavailable
+          if (unavailableDatesSet.has(dayStr)) {
+            continue;
+          }
+          
+          // Check if this day of week has staff
+          const dayOfWeek = daysOfWeek[date.getDay()];
+          if (!daysWithStaff[dayOfWeek]) {
+            unavailableDatesSet.add(dayStr);
+          }
+        }
+      }
     }
-  };
+    
+    console.log("Unavailable dates:", Array.from(unavailableDatesSet));
+    setUnavailableDates(unavailableDatesSet);
+    setTimeSlotData(timeSlotDataObj);
+  } catch (error) {
+    console.error("Error fetching unavailability:", error);
+  } finally {
+    setLoading(false);
+  }
+};
 
   // Function to check for consecutive available hours
   const checkConsecutiveAvailableHours = (bookedTimeSlots, requiredConsecutiveHours = 2) => {
@@ -171,20 +293,8 @@ export default function useBookingLogic(serviceType) {
     return false;
   };
 
-  // Format date to YYYY-MM-DD
-  const formatDateLocal = (date) => {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, "0");
-    const day = String(date.getDate()).padStart(2, "0");
-    return `${year}-${month}-${day}`;
-  };
-  
-  // Format date for display
-  const formatDisplayDate = (dateStr) => {
-    if (!dateStr) return "No date selected";
-    const [year, month, day] = dateStr.split('-');
-    return `Selected Date: ${day} ${monthNames[parseInt(month) - 1]} ${year}`;
-  };
+ 
+
 
   // Function to get min/max dates for calendar
   const getCalendarMinMaxDates = () => {
@@ -227,34 +337,7 @@ export default function useBookingLogic(serviceType) {
     return parseInt(timeStr.split(':')[0]);
   };
 
-  // Check if a date has at least 2 consecutive hours available
-  const hasConsecutiveAvailableHours = (bookedTimeSlots, requiredConsecutiveHours = 2) => {
-    const allTimeSlots = generateAllTimeSlots();
-    
-    // Create an array representing all hours (true = available, false = booked)
-    const availabilityMap = allTimeSlots.map(slot => !bookedTimeSlots[slot]);
-    
-    // Debug output
-    console.log("Checking consecutive hours for:", bookedTimeSlots);
-    console.log("Availability map:", availabilityMap);
-    
-    // Check for consecutive available slots
-    let consecutiveCount = 0;
-    for (let i = 0; i < availabilityMap.length; i++) {
-      if (availabilityMap[i]) {
-        consecutiveCount++;
-        if (consecutiveCount >= requiredConsecutiveHours) {
-          console.log(`Found ${requiredConsecutiveHours} consecutive available hours`);
-          return true; // Found enough consecutive slots
-        }
-      } else {
-        consecutiveCount = 0;
-      }
-    }
-    
-    console.log("Not enough consecutive hours available");
-    return false;
-  };
+
 
   // Calculate which time slots to mark as booked based on booking hours
   const calculateBookedTimeSlots = (startTime, estimatedHours) => {
@@ -271,121 +354,247 @@ export default function useBookingLogic(serviceType) {
     return bookedSlots;
   };
 
-// Update time slots in Firebase when a booking is made
-const updateTimeSlots = async (dateStr, startTime, estimatedHours, bookingInfo) => {
-    try {
-      console.log(`Updating time slots for ${dateStr}, starting at ${startTime} for ${estimatedHours} hours`);
-      console.log("Booking info:", bookingInfo);
+
+
+
+// Replace your existing generateTimeSlots with this implementation
+const generateTimeSlots = async (date) => {
+  console.log(`Generating time slots for date: ${date}`);
+  
+  if (!date) {
+    setAvailableTimeSlots([]);
+    return;
+  }
+  
+  // Show loading state immediately
+  setAvailableTimeSlots([{ display: "Loading...", value: "", available: false, isLoading: true }]);
+  
+  try {
+    // Use cached settings or fetch if needed
+    let settings = availabilitySettings;
+    if (!settings) {
+      const settingsDoc = await getDoc(doc(db, "settings", "availability"));
+      settings = settingsDoc.exists() ? settingsDoc.data() : {
+        minimumNoticeHours: 0,
+        bufferTimeBetweenBookings: 0,
+        assignTwoCleanersAfterHours: 4,
+        useStaffAvailability: false
+      };
+      setAvailabilitySettings(settings);
+    }
+    
+    // Get the booked time slots for this date
+    const bookedTimeSlotData = timeSlotData[date] || {};
+    
+    // Get staff info
+    let activeStaff = staffCache;
+    if (!activeStaff && settings.useStaffAvailability) {
+      const staffSnapshot = await getDocs(collection(db, "staff"));
+      activeStaff = staffSnapshot.docs
+        .map(doc => ({ id: doc.id, ...doc.data() }))
+        .filter(staff => staff.active);
+      setStaffCache(activeStaff);
+    }
+    
+    const totalStaffCount = activeStaff?.length || 0;
+    console.log(`Total active staff: ${totalStaffCount}`);
+    
+    // Calculate staff assignment by hour
+    const staffAssignedByHour = {};
+    
+    // First, group bookings by ID to properly count staff
+    const bookingGroups = {};
+    
+    // Process each booked slot to group by booking ID
+   // Process each booked slot to group by booking ID
+for (const [timeSlot, booking] of Object.entries(bookedTimeSlotData)) {
+  const bookingId = booking.bookingId || booking.orderId || 'unknown';
+  const hour = parseInt(timeSlot.split(':')[0]);
+  
+  if (!bookingGroups[bookingId]) {
+    // IMPORTANT: Check if this booking requires 2 staff
+    // Use the explicit flags we added with more thorough checks
+    const requiresTwoStaff = 
+      booking.staffRequired === 2 || 
+      booking.assignTwoCleaners === true ||
+      // FIXED: Make sure to check both original and actual hours
+      (booking.originalHours && settings.assignTwoCleanersAfterHours > 0 && 
+        parseFloat(booking.originalHours) > settings.assignTwoCleanersAfterHours);
+    
+    // Debug output
+    console.log(`Checking booking ${bookingId}:`, {
+      staffRequired: booking.staffRequired,
+      assignTwoCleaners: booking.assignTwoCleaners,
+      originalHours: booking.originalHours,
+      estimatedHours: booking.estimatedHours,
+      threshold: settings.assignTwoCleanersAfterHours,
+      requiresTwoStaff: requiresTwoStaff
+    });
+    
+    bookingGroups[bookingId] = {
+      hours: [hour],
+      staffNeeded: requiresTwoStaff ? 2 : 1,
+      booking: booking
+    };
+    
+    console.log(`Booking ${bookingId} requires ${requiresTwoStaff ? 2 : 1} staff members`);
+  } else {
+    bookingGroups[bookingId].hours.push(hour);
+  }
+}
+    
+    // Now assign staff for each hour
+    for (let hour = 7; hour <= 20; hour++) {
+      staffAssignedByHour[hour] = 0;
       
-      // Get existing data for this date, if any
-      const dateRef = doc(db, "unavailability", dateStr);
-      const dateDoc = await getDoc(dateRef);
-      const existingData = dateDoc.exists() ? dateDoc.data() : {};
-      
-      // Calculate which time slots will be booked
-      const newBookedSlots = calculateBookedTimeSlots(startTime, estimatedHours);
-      console.log("New booked slots:", newBookedSlots);
-      
-      // Merge with existing booked slots, if any
-      const existingBookedSlots = existingData.bookedTimeSlots || {};
-      console.log("Existing booked slots:", existingBookedSlots);
-      
-      const updatedBookedSlots = { ...existingBookedSlots };
-      
-      // Add the new booking information to each booked slot
-      Object.keys(newBookedSlots).forEach(timeSlot => {
-        updatedBookedSlots[timeSlot] = {
-          bookedBy: bookingInfo.email,
-          name: bookingInfo.name,
-          phone: bookingInfo.phone,
-          bookingId: bookingInfo.orderId,
-          bookingTimestamp: bookingInfo.timestamp,
-          service: serviceType, // Include service type
-          ...bookingInfo // Include all other booking details
-        };
-      });
-      
-      console.log("Updated booked slots:", updatedBookedSlots);
-      
-      // Check if this booking would leave at least 2 consecutive hours
-      const fullyBooked = !hasConsecutiveAvailableHours(updatedBookedSlots);
-      console.log(`After booking, date is ${fullyBooked ? 'fully booked' : 'partially available'}`);
-      
-      // Update in Firebase
-      await setDoc(dateRef, {
-        bookedTimeSlots: updatedBookedSlots,
-        fullyBooked
-      }, { merge: true });
-      
-      // IMPORTANT: Update local state to immediately reflect changes
-      // Update time slot data in state
-      setTimeSlotData(prev => ({
-        ...prev,
-        [dateStr]: updatedBookedSlots
-      }));
-      
-      // If the date is now fully booked, add it to unavailable dates
-      if (fullyBooked) {
-        setUnavailableDates(prev => {
-          const updated = new Set(prev);
-          updated.add(dateStr);
-          return updated;
-        });
+      // Count assigned staff for this hour from each booking
+      for (const [bookingId, bookingData] of Object.entries(bookingGroups)) {
+        if (bookingData.hours.includes(hour)) {
+          staffAssignedByHour[hour] += bookingData.staffNeeded;
+        }
       }
       
-      return { updatedBookedSlots, fullyBooked };
-    } catch (error) {
-      console.error("Error updating time slots:", error);
-      throw error;
-    }
-  };
-
-  // Generate time slots for UI
-  const generateTimeSlots = (date) => {
-    console.log(`Generating time slots for date: ${date}`);
-    
-    // If no date is selected, return empty slots
-    if (!date) {
-      setAvailableTimeSlots([]);
-      return;
+      console.log(`Hour ${hour}:00 has ${staffAssignedByHour[hour]} staff assigned`);
     }
     
-    // Get the booked time slots for this date from timeSlotData
-    const bookedTimeSlotData = timeSlotData[date] || {};
-    console.log(`Booked slots for ${date}:`, bookedTimeSlotData);
+    // Create temporary array for slots
+    const tempSlots = [];
     
-    const slots = [];
+    // Get the current date and time
+    const now = new Date();
+    const today = now.toISOString().split('T')[0]; // YYYY-MM-DD format
+    const currentHour = now.getHours();
+    const minimumNoticeHours = settings.minimumNoticeHours || 0;
     
+    // Calculate the earliest available hour based on minimum notice
+    let earliestAvailableHour = currentHour;
+    if (date === today && minimumNoticeHours > 0) {
+      earliestAvailableHour = currentHour + minimumNoticeHours;
+      // Round up to next hour for partial hours
+      if (now.getMinutes() > 0) {
+        earliestAvailableHour += 1;
+      }
+    }
+    
+    // Process each time slot
     for (let hour = 7; hour <= 20; hour++) {
       const timeSlot = `${hour}:00`;
-      // Check if this slot is booked
       const isBooked = bookedTimeSlotData[timeSlot] ? true : false;
       
-      // Check if this slot is in the past (for today)
-      const isPast = isPastTimeSlot(timeSlot, date);
+      // Check if this slot is in the past or within minimum notice period
+      const isPast = (date === today && hour <= currentHour);
+      const isWithinMinNotice = (date === today && hour > currentHour && hour < earliestAvailableHour);
+      
+      // Start with basic availability check
+      let isAvailable = !isPast && !isWithinMinNotice;
+      let staffLimited = false;
+      
+     // Replace with this more robust check:
+     if (isBooked) {
+      const assignedStaff = staffAssignedByHour[hour] || 0;
+      const remainingStaff = totalStaffCount - assignedStaff;
+      
+      console.log(`Hour ${hour}:00 - Total staff: ${totalStaffCount}, Assigned: ${assignedStaff}, Remaining: ${remainingStaff}`);
+      
+      // Debug the specific bookings for this hour
+      for (const [bookingId, bookingData] of Object.entries(bookingGroups)) {
+        if (bookingData.hours.includes(hour)) {
+          console.log(`  Booking ${bookingId} using ${bookingData.staffNeeded} staff:`, {
+            originalHours: bookingData.booking.originalHours,
+            estimatedHours: bookingData.booking.estimatedHours,
+            assignTwoCleaners: bookingData.booking.assignTwoCleaners,
+            staffRequired: bookingData.booking.staffRequired
+          });
+        }
+      }
+      
+      // More robust check with fallback
+      if (assignedStaff >= totalStaffCount || remainingStaff <= 0) {
+        console.log(`⛔ NO STAFF AVAILABLE - blocking time slot ${hour}:00`);
+        isAvailable = false;
+        staffLimited = false;
+      } else if (remainingStaff === 1) {
+        console.log(`⚠️ LIMITED STAFF - marking time slot ${hour}:00 as limited`);
+        isAvailable = true;
+        staffLimited = true;
+      } else {
+        console.log(`✅ STAFF AVAILABLE - time slot ${hour}:00 is available`);
+        isAvailable = true;
+        staffLimited = false;
+      }
+    }
+    
+      
+      // Buffer time check
+      if (isAvailable && settings.bufferTimeBetweenBookings > 0) {
+        const bufferHours = settings.bufferTimeBetweenBookings;
+        
+        // Check if this hour is within buffer time of any booking
+        for (const [bookingId, bookingData] of Object.entries(bookingGroups)) {
+          const bookingHours = bookingData.hours;
+          if (bookingHours.length > 0) {
+            const minHour = Math.min(...bookingHours);
+            const maxHour = Math.max(...bookingHours);
+            
+            // Check if current hour is within buffer before booking
+            if (hour >= minHour - bufferHours && hour < minHour) {
+              isAvailable = false;
+              break;
+            }
+            
+            // Check if current hour is within buffer after booking
+            if (hour > maxHour && hour <= maxHour + bufferHours) {
+              isAvailable = false;
+              break;
+            }
+          }
+        }
+      }
+      
+      // Staff availability check from settings
+      if (isAvailable && settings.useStaffAvailability) {
+        // Check if remaining staff is sufficient for a new booking
+        const assignedStaff = staffAssignedByHour[hour] || 0;
+        const remainingStaff = totalStaffCount - assignedStaff;
+        
+        // Need at least 1 staff for a new booking
+        isAvailable = remainingStaff > 0;
+        
+        // Mark as limited staff if only 1 remains (potential limit on booking hours)
+        staffLimited = (remainingStaff === 1);
+      }
       
       const displayHour = hour > 12 ? hour - 12 : hour;
       const amPm = hour >= 12 ? 'PM' : 'AM';
       
-      slots.push({
+      tempSlots.push({
         display: `${displayHour} ${amPm}`,
         value: timeSlot,
-        available: !isBooked && !isPast,
-        isPast: isPast
+        available: isAvailable,
+        isPast: isPast || isWithinMinNotice,
+        staffLimited: staffLimited
       });
     }
     
-    console.log(`Generated time slots for ${date}:`, slots);
-    setAvailableTimeSlots(slots);
-  };
+    // Update state with processed slots
+    setAvailableTimeSlots(tempSlots);
+  } catch (error) {
+    console.error("Error generating time slots:", error);
+    setAvailableTimeSlots([{ display: "Error loading slots", value: "", available: false, isError: true }]);
+  }
+};
 
-  // Update time slot selection to only allow selecting available slots
-  const handleTimeSelect = (time) => {
-    const slot = availableTimeSlots.find(slot => slot.value === time);
-    if (slot && slot.available) {
-      setSelectedTime(time);
-    }
-  };
+// Replace your existing handleTimeSelect with this implementation
+const handleTimeSelect = (time) => {
+  const slot = availableTimeSlots.find(slot => slot.value === time);
+  if (slot && slot.available) {
+    setSelectedTime(time);
+    
+    // Set staffLimitedSelected flag if this slot has limited staff
+    setStaffLimitedSelected(slot.staffLimited || false);
+  }
+};
+
 
   // Set tile class for calendar
   const tileClassName = ({ date, view }) => {
@@ -416,6 +625,7 @@ const updateTimeSlots = async (dateStr, startTime, estimatedHours, bookingInfo) 
     availableTimeSlots,
     currentMonth,
     currentYear,
+    staffLimitedSelected,
     
     // Functions
     setSelectedDate,

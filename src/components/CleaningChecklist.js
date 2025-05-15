@@ -10,173 +10,159 @@ const ChecklistTemplate = ({ booking }) => {
   const isHomeService = 
     booking.service === "Home Cleaning" || 
     (booking.bedrooms !== undefined && booking.livingRooms !== undefined);
-  console.log(booking);
+  
   // Extract booking details - handle both direct properties and nested ones
   const customerName = booking.customerName || "No name provided";
-  const customerEmail = booking.customerEmail || booking.email || "No email provided";
-  const customerPhone = booking.customerPhone || booking.phone || "No phone provided";
+  const address = booking.address || "Address not provided";
   const bookingDate = booking.displayDate || booking.date || "No date provided";
   const bookingTime = booking.displayTimeRange || booking.time || "No time provided";
   const serviceType = booking.service || (isHomeService ? "Home Cleaning" : "Office Cleaning");
-  const additionalInfo = booking.additionalInfo || "None provided";
   
-  // For address - this might not be available in current data structure
-  const address = booking.address || "Address not provided";
-  
-  // Home cleaning specific fields
-  const bedrooms = booking.bedrooms || "N/A";
-  const livingRooms = booking.livingRooms || "N/A";
-  const bathrooms = booking.bathrooms || "0";
-  const kitchens = booking.kitchens || "0";
-  
-  // Office cleaning specific fields
-  const officeRooms = booking.officeRooms || "N/A";
-  const officeSize = booking.officeSize || "N/A";
-  const meetingRooms = booking.meetingRooms || "N/A";
-  const meetingRoomSize = booking.meetingRoomSize || "N/A";
-  const cleanliness = booking.cleanliness || "N/A";
-  
-
-  // Add-ons and additional areas/rooms
-  const addOns = booking.addOns || "None";
-  const additionalAreas = booking.additionalAreas || booking.additionalRooms || "None";
-
   // For debugging - log the booking object to console
   console.log("Cleaning Checklist - Booking data:", booking);
-  console.log("Service type detected:", serviceType, "isHomeService:", isHomeService);
 
   return (
     <div id="pdf-container" style={{ width: '794px', padding: '40px', fontFamily: 'Arial, sans-serif', color: '#333' }}>
       {/* Header */}
       <div style={{ textAlign: 'center', marginBottom: '20px', borderBottom: '2px solid #3b82f6', paddingBottom: '10px' }}>
-        <h1 style={{ fontSize: '24px', color: '#3b82f6' }}>LUXEN CLEANING - JOB CHECKLIST</h1>
+        <h1 style={{ fontSize: '24px', color: '#3b82f6' }}>LUXEN CLEANING - STAFF CHECKLIST</h1>
         <div style={{ fontSize: '14px' }}>
           <p><strong>Date:</strong> {bookingDate} | <strong>Time:</strong> {bookingTime}</p>
           <p><strong>Service Type:</strong> {serviceType}</p>
         </div>
       </div>
 
-      {/* Customer Details */}
+      {/* Customer Details - Simplified */}
       <div style={{ marginBottom: '20px' }}>
         <h2 style={{ fontSize: '18px', backgroundColor: '#f3f4f6', padding: '5px' }}>CUSTOMER DETAILS</h2>
         <p><strong>Name:</strong> {customerName}</p>
-        <p><strong>Email:</strong> {customerEmail}</p>
-        <p><strong>Phone:</strong> {customerPhone}</p>
-        <p><strong>Address:</strong> {address}</p>
+        <p style={{ fontSize: '16px', marginTop: '10px' }}><strong>Address:</strong></p>
+        <p style={{ fontSize: '16px', marginBottom: '15px', padding: '10px', backgroundColor: '#f9fafb', borderRadius: '5px' }}>{address}</p>
       </div>
 
-      {/* Property Details */}
+      {/* Property Details - 2 items per row */}
       <div style={{ marginBottom: '20px' }}>
         <h2 style={{ fontSize: '18px', backgroundColor: '#f3f4f6', padding: '5px' }}>PROPERTY DETAILS</h2>
-        {isHomeService ? (
-          <div>
-            <p><strong>Bedrooms:</strong> {bedrooms}</p>
-            <p><strong>Living Rooms:</strong> {livingRooms}</p>
-            <p><strong>Bathrooms:</strong> {bathrooms}</p>
-            <p><strong>Kitchens:</strong> {kitchens}</p>
-            <p><strong>Cleanliness:</strong> {cleanliness}</p>
-            <p><strong>Additional Rooms:</strong> {additionalAreas}</p>
-          </div>
-        ) : (
-          <div>
-            <p><strong>Office Rooms:</strong> {officeRooms}</p>
-            <p><strong>Office Size:</strong> {officeSize}</p>
-            <p><strong>Meeting Rooms:</strong> {meetingRooms}</p>
-            <p><strong>Meeting Size:</strong> {meetingRoomSize}</p>
-            <p><strong>Bathrooms:</strong> {bathrooms}</p>
-            <p><strong>Kitchens:</strong> {kitchens}</p>
-            <p><strong>Cleanliness:</strong> {cleanliness}</p>
-            <p><strong>Additional Areas:</strong> {additionalAreas}</p>
-          </div>
-        )}
-        <p><strong>Add-ons:</strong> {addOns}</p>
-        {additionalInfo && <p><strong>Additional Info:</strong> {additionalInfo}</p>}
-      </div>
-
-      {/* Cleaning Checklist */}
-      <div style={{ marginBottom: '20px' }}>
-        <h2 style={{ fontSize: '18px', backgroundColor: '#f3f4f6', padding: '5px' }}>CLEANING CHECKLIST</h2>
-        
-        {/* General Tasks */}
-        <h3 style={{ fontSize: '16px', marginTop: '10px' }}>General Tasks:</h3>
-        <div style={{ marginLeft: '20px' }}>
-          <p>☐ Arrival confirmation (take photo and text to manager)</p>
-          <p>☐ Wear appropriate uniform/PPE</p>
-          <p>☐ Check all cleaning supplies are available</p>
-          <p>☐ Test any equipment before starting</p>
-        </div>
-
-        {/* Before Photos */}
-        <h3 style={{ fontSize: '16px', marginTop: '15px' }}>Before Photos:</h3>
-        <div style={{ marginLeft: '20px' }}>
-          <p>☐ Take photos of each room before cleaning</p>
-          <p>☐ Document any pre-existing damage</p>
-          <p>☐ Document any unusually dirty areas</p>
-        </div>
-
-        {/* Service-Specific Tasks */}
-        <h3 style={{ fontSize: '16px', marginTop: '15px' }}>{isHomeService ? 'Home Cleaning Tasks:' : 'Office Cleaning Tasks:'}</h3>
-        <div style={{ marginLeft: '20px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
           {isHomeService ? (
             <>
-              <p>☐ Dust all surfaces</p>
-              <p>☐ Vacuum all floors and furniture</p>
-              <p>☐ Mop hard floors</p>
-              <p>☐ Clean bathrooms (toilet, shower, sink, mirrors)</p>
-              <p>☐ Clean kitchen (counters, sink, appliance exteriors)</p>
-              <p>☐ Empty trash bins</p>
-              <p>☐ Make beds (if requested)</p>
-              <p>☐ Clean windows (interior only)</p>
+              <p><strong>Bedrooms:</strong> {booking.bedrooms || "N/A"}</p>
+              <p><strong>Living Rooms:</strong> {booking.livingRooms || "N/A"}</p>
+              <p><strong>Bathrooms:</strong> {booking.bathrooms || "0"}</p>
+              <p><strong>Kitchens:</strong> {booking.kitchens || "0"}</p>
+              <p><strong>Cleanliness:</strong> {booking.cleanliness || "N/A"}</p>
+              <p><strong>Additional Rooms:</strong> {booking.additionalRooms || "None"}</p>
             </>
           ) : (
             <>
-              <p>☐ Clean and dust all desks and workstations</p>
-              <p>☐ Clean meeting room tables and chairs</p>
-              <p>☐ Clean and sanitize bathrooms</p>
-              <p>☐ Clean kitchen/break areas</p>
-              <p>☐ Empty all trash bins</p>
-              <p>☐ Vacuum carpets</p>
-              <p>☐ Mop hard floors</p>
-              <p>☐ Clean entrance and reception</p>
+              <p><strong>Office Rooms:</strong> {booking.officeRooms || "N/A"}</p>
+              <p><strong>Office Size:</strong> {booking.officeSize || "N/A"}</p>
+              <p><strong>Meeting Rooms:</strong> {booking.meetingRooms || "N/A"}</p>
+              <p><strong>Meeting Room Size:</strong> {booking.meetingRoomSize || "N/A"}</p>
+              <p><strong>Bathrooms:</strong> {booking.bathrooms || "0"}</p>
+              <p><strong>Kitchens:</strong> {booking.kitchens || "0"}</p>
             </>
+          )}
+          <p><strong>Add-ons:</strong> {booking.addOns || "None"}</p>
+        </div>
+      </div>
+
+      {/* New Cleaning Checklist */}
+      <div style={{ marginBottom: '20px' }}>
+        <h2 style={{ fontSize: '18px', backgroundColor: '#f3f4f6', padding: '5px' }}>✅ DAILY CLEANING CHECKLIST FOR STAFF</h2>
+        
+        {/* Start of Day */}
+        <h3 style={{ fontSize: '16px', marginTop: '15px' }}>🕗 Start of the Day: Preparation</h3>
+        <div style={{ marginLeft: '20px' }}>
+          <p>☐ Access instructions (see details above)</p>
+          <p>☐ Use customer products or bring own</p>
+          <p>☐ Get all cleaning items you need (gloves, masks, sponges, cloths, mop, bucket, hoover)</p>
+          <p>☐ Load any specific products/tools needed for add-on services</p>
+        </div>
+
+        {/* Before Entering */}
+        <h3 style={{ fontSize: '16px', marginTop: '15px' }}>📸 Before Entering the Property</h3>
+        <div style={{ marginLeft: '20px' }}>
+          <p>☐ Arrive on time or notify if running late</p>
+          <p>☐ Greet the client politely if they're present</p>
+          <p>☐ Take <strong>before photos</strong> of each room or area and send in WhatsApp</p>
+        </div>
+
+        {/* General Cleaning Tasks */}
+        <h3 style={{ fontSize: '16px', marginTop: '15px' }}>🧽 General Cleaning Tasks – Every Clean</h3>
+        
+        <h4 style={{ fontSize: '14px', marginTop: '10px', marginLeft: '10px' }}>Living Areas & Bedrooms:</h4>
+        <div style={{ marginLeft: '20px' }}>
+          <p>☐ Dust all surfaces, furniture, skirting boards, and light fixtures</p>
+          <p>☐ Wipe down doors, handles, and switches</p>
+          <p>☐ Vacuum carpets/rugs and mop hard floors</p>
+          <p>☐ Make beds (residential only)</p>
+          <p>☐ Empty bins and replace liners</p>
+        </div>
+        
+        <h4 style={{ fontSize: '14px', marginTop: '10px', marginLeft: '10px' }}>Kitchen:</h4>
+        <div style={{ marginLeft: '20px' }}>
+          <p>☐ Clean countertops, splashbacks, and cupboard fronts</p>
+          <p>☐ Wipe down appliances (exterior only unless add-on selected)</p>
+          <p>☐ Clean sink, taps, and remove any limescale</p>
+          <p>☐ Sweep and mop floors</p>
+          <p>☐ Empty bins and remove rubbish</p>
+        </div>
+        
+        <h4 style={{ fontSize: '14px', marginTop: '10px', marginLeft: '10px' }}>Bathrooms:</h4>
+        <div style={{ marginLeft: '20px' }}>
+          <p>☐ Clean toilet (inside and out)</p>
+          <p>☐ Scrub sinks, baths, showers, tiles, and taps</p>
+          <p>☐ Wipe mirrors and surfaces</p>
+          <p>☐ Mop floors</p>
+          <p>☐ Refill toilet roll, soap, or paper towels (commercial only, if stocked)</p>
+        </div>
+
+        {/* Add-On Services */}
+        <h3 style={{ fontSize: '16px', marginTop: '15px' }}>🔌 Add-On Services (if booked)</h3>
+        <div style={{ marginLeft: '20px' }}>
+          <p style={{ fontWeight: 'bold', fontStyle: 'italic', marginBottom: '10px' }}>Confirm add-ons in the job sheet before starting.</p>
+          
+          {booking.addOns && booking.addOns.includes('oven') && (
+            <p>☐ <strong>Oven Cleaning</strong> – Clean racks, interior, door glass</p>
+          )}
+          
+          {(booking.addOns && (booking.addOns.includes('fridge') || booking.addOns.includes('freezer') || booking.addOns.includes('fridge-freezer'))) && (
+            <p>☐ <strong>Fridge/Freezer Cleaning</strong> – Remove contents, clean shelves and interior, return items</p>
+          )}
+          
+          {booking.addOns && booking.addOns.includes('microwave') && (
+            <p>☐ <strong>Microwave/Small Appliances</strong> – Clean inside and out</p>
+          )}
+          
+          {booking.addOns && (booking.addOns.includes('curtain') || booking.addOns.includes('blind-cleaning')) && (
+            <p>☐ <strong>Curtain/Blind Dusting</strong> – Light vacuuming or wipe-down depending on fabric</p>
+          )}
+          
+          {booking.addOns && booking.addOns.includes('window-cleaning') && (
+            <p>☐ <strong>Interior Windows</strong> – Clean with streak-free finish</p>
+          )}
+          
+          {(!booking.addOns || booking.addOns === "None") && (
+            <p>No add-on services booked for this job.</p>
           )}
         </div>
 
-        {/* Add-on Tasks */}
-        {addOns && addOns !== "None" && (
-          <>
-            <h3 style={{ fontSize: '16px', marginTop: '15px' }}>Add-on Tasks:</h3>
-            <div style={{ marginLeft: '20px' }}>
-              {addOns.includes('carpet-cleaning') && <p>☐ Deep clean carpets</p>}
-              {addOns.includes('oven') && <p>☐ Clean oven interior and racks</p>}
-              {addOns.includes('fridge') && <p>☐ Clean refrigerator interior</p>}
-              {addOns.includes('freezer') && <p>☐ Clean freezer interior</p>}
-              {addOns.includes('fridge-freezer') && <p>☐ Clean fridge and freezer interior</p>}
-              {addOns.includes('ironing') && <p>☐ Iron clothes as requested</p>}
-              {addOns.includes('kitchen-cupboard') && <p>☐ Clean kitchen cupboards (inside)</p>}
-              {addOns.includes('blind-cleaning') && <p>☐ Clean blinds</p>}
-              {addOns.includes('curtain') && <p>☐ Clean curtains</p>}
-              {addOns.includes('window-cleaning') && <p>☐ Clean windows</p>}
-              {addOns.includes('microwave') && <p>☐ Clean microwave interior and exterior</p>}
-            </div>
-          </>
-        )}
-
-        {/* After Photos */}
-        <h3 style={{ fontSize: '16px', marginTop: '15px' }}>After Photos:</h3>
+        {/* Finishing Touches */}
+        <h3 style={{ fontSize: '16px', marginTop: '15px' }}>🪟 Finishing Touches</h3>
         <div style={{ marginLeft: '20px' }}>
-          <p>☐ Take photos of each room after cleaning</p>
-          <p>☐ Take close-up photos of detailed work</p>
-          <p>☐ Document any areas that couldn't be cleaned and why</p>
+          <p>☐ Double check all rooms – nothing missed or left behind</p>
+          <p>☐ Make sure you return furniture and items how they were</p>
+          <p>☐ Leave rooms tidy and presentable</p>
+          <p>☐ Leave our card and diffuser in a central area like living room on a table</p>
+          <p>☐ Note any damage or issues (report with photos)</p>
         </div>
 
-        {/* Final Steps */}
-        <h3 style={{ fontSize: '16px', marginTop: '15px' }}>Final Steps:</h3>
+        {/* End of Job */}
+        <h3 style={{ fontSize: '16px', marginTop: '15px' }}>📱 End of Each Job</h3>
         <div style={{ marginLeft: '20px' }}>
-          <p>☐ Final walkthrough of all areas</p>
-          <p>☐ Return keys/secure property</p>
-          <p>☐ Text manager when job complete</p>
-          <p>☐ Send all photos via WhatsApp to manager</p>
+          <p>☐ Take photos of each room and send into WhatsApp with feedback or issues</p>
+          <p>☐ Lock up securely or hand back keys as instructed</p>
         </div>
       </div>
 

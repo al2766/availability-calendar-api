@@ -348,6 +348,8 @@ body {
   position: relative;
 }
 
+
+
 /* Unavailable dates */
 .booking-calendar .react-calendar__tile.unavailable {
   background-color: #f1f1f1 !important;
@@ -365,6 +367,7 @@ body {
   background-color: #0071bc(darken 5%) !important;
   color: white !important;
 }
+
 
 
 /* Time Slot Styles */

@@ -1,11 +1,13 @@
 // src/forms/OfficeCleaningForm.js
 import React, { useState, useEffect } from "react";
+import { collection, getDocs, setDoc, deleteDoc, doc, deleteField, getDoc } from "firebase/firestore";
+import { db } from "../firebase";
 import Calendar from "react-calendar";
 import "react-calendar/dist/Calendar.css";
 import "../App.css";
 import useBookingLogic from "../hooks/useBookingLogic";
 import AddressLookup from "../components/AddressLookup";
-import { handleFormSubmission } from "../utils/bookingFormUtils";
+import { handleFormSubmission, calculatePrice } from "../utils/bookingFormUtils";
 
 function OfficeCleaningForm() {
   // Use the shared booking logic
@@ -22,8 +24,12 @@ function OfficeCleaningForm() {
     meetingRoomSize: "",
     kitchens: "",
     bathrooms: "",
+    utilityRooms: "0", // Added utility rooms as separate field
     cleanliness: "",
     additionalInfo: "",
+    access: "", // Added property access field
+    keyLocation: "", // Added key location field
+    products: "", // Added products field
     // Add address fields to formData
     address: {
       line1: "",
@@ -73,7 +79,7 @@ function OfficeCleaningForm() {
       line2: selectedAddress.line2 || "",
       town: selectedAddress.town || "",
       county: selectedAddress.county || "",
-      postcode: selectedAddress.postcode || "" // Make sure postcode is included
+      postcode: selectedAddress.postcode || ""
     };
     
     // Save to form data
@@ -111,97 +117,7 @@ function OfficeCleaningForm() {
       }
     });
   };
-  
-  // Calculate price based on form inputs for office cleaning
-  const calculatePrice = () => {
-    const hourlyRate = 28; // £28 per hour
-    let baseHours = 0;
-    let additionalAreasHours = 0;
-    let addonsCost = 0;
-    let dirtinessMultiplier = 1;
-    
-    // Base hours calculation based on office size and rooms
-    const officeRooms = parseInt(formData.officeRooms) || 0;
-    const meetingRooms = parseInt(formData.meetingRooms) || 0;
-    const kitchens = parseInt(formData.kitchens) || 0;
-    const bathrooms = parseInt(formData.bathrooms) || 0;
-    
-    // Office rooms calculation based on size category
-    if (officeRooms > 0) {
-      // Adjust hours based on office size
-      const roomSizeMultiplier = 
-        formData.officeSize === "small" ? 0.5 :  // Small: 30 mins per office
-        formData.officeSize === "medium" ? 0.75 : // Medium: 45 mins per office
-        formData.officeSize === "large" ? 1.0 : 0.75; // Large: 1 hour per office, default to medium
-      
-      baseHours += officeRooms * roomSizeMultiplier;
-    }
-    
-    // Meeting rooms calculation based on size category
-    if (meetingRooms > 0) {
-      const meetingSizeMultiplier = 
-        formData.meetingRoomSize === "small" ? 0.5 :  // Small: 30 mins per meeting room
-        formData.meetingRoomSize === "medium" ? 0.75 : // Medium: 45 mins per meeting room
-        formData.meetingRoomSize === "large" ? 1.25 : 0.75; // Large: 1 hour 15 mins per meeting room, default to medium
-      
-      baseHours += meetingRooms * meetingSizeMultiplier;
-    }
-    
-    // Add time for kitchens and bathrooms
-    baseHours += kitchens * 1.0; // 1 hour per kitchen
-    baseHours += bathrooms * 0.5; // 30 mins per bathroom
-    
-    // Minimum base hours
-    baseHours = Math.max(baseHours, 2); // At least 2 hours
-    
-    // Dirtiness multiplier
-    const cleanliness = formData.cleanliness;
-    if (cleanliness === "quite-clean") {
-      dirtinessMultiplier = 1;
-    } else if (cleanliness === "average") {
-      dirtinessMultiplier = 1.2;
-    } else if (cleanliness === "quite-dirty") {
-      dirtinessMultiplier = 1.5;
-    } else if (cleanliness === "filthy") {
-      dirtinessMultiplier = 2;
-    }
-    
-    // Apply dirtiness multiplier
-    baseHours *= dirtinessMultiplier;
-    
-    // Calculate additional areas hours
-    additionalAreas.forEach(area => {
-      if (area === "reception") {
-        additionalAreasHours += 0.5; // 30 mins for reception
-      } else if (area === "waiting-area") {
-        additionalAreasHours += 0.5; // 30 mins for waiting area
-      } else if (area === "stairwell") {
-        additionalAreasHours += 0.75; // 45 mins for stairwell
-      } else if (area === "hallways") {
-        additionalAreasHours += 0.5; // 30 mins for hallways
-      }
-    });
-    
-    // Calculate add-ons cost
-    addOns.forEach(addon => {
-      addonsCost += addon.price || 0;
-    });
-    
-    // Calculate costs
-    const basePrice = Math.ceil(baseHours) * hourlyRate;
-    const additionalAreasPrice = Math.ceil(additionalAreasHours) * hourlyRate;
-    const totalHours = Math.ceil(baseHours + additionalAreasHours);
-    const totalPrice = basePrice + additionalAreasPrice + addonsCost;
-    
-    // Update price breakdown
-    setPriceBreakdown({
-      basePrice: basePrice.toFixed(2),
-      additionalAreasPrice: additionalAreasPrice.toFixed(2),
-      addonsPrice: addonsCost.toFixed(2),
-      totalPrice: totalPrice.toFixed(2),
-      estimatedHours: totalHours
-    });
-  };
+ 
   
   // Reset form function
   const resetForm = () => {
@@ -215,8 +131,12 @@ function OfficeCleaningForm() {
       meetingRoomSize: "",
       kitchens: "",
       bathrooms: "",
+      utilityRooms: "0",
       cleanliness: "",
       additionalInfo: "",
+      access: "",
+      keyLocation: "",
+      products: "",
       address: {
         line1: "",
         line2: "",
@@ -276,27 +196,37 @@ function OfficeCleaningForm() {
             />
           )}
           
-          {/* Time Slot Container */}
-          <div className="time-slot-container mt-6 p-6 bg-white rounded-lg">
-            <h2 className="time-slot-title text-lg text-blue-600 font-medium mb-4">
-              {booking.selectedDate ? "Select a Time" : "Please select a date first"}
-            </h2>
-            {booking.selectedDate && (
-              <div className="time-slots-grid grid grid-cols-3 gap-2 md:gap-3">
-                {booking.availableTimeSlots.map((slot, index) => (
-                  <div 
-                    key={index}
-                    className={`time-slot p-3 text-center border rounded-md 
-                      ${!slot.available ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'cursor-pointer hover:bg-blue-100'} 
-                      ${booking.selectedTime === slot.value ? 'selected' : ''}`}
-                    onClick={() => slot.available && booking.handleTimeSelect(slot.value)}
-                  >
-                    {slot.display}
-                  </div>
-                ))}
-              </div>
-            )}
+       {/* Time Slot Container */}
+<div className="time-slot-container mt-6 p-6 bg-white rounded-lg">
+  <h2 className="time-slot-title text-lg text-blue-600 font-medium mb-4">
+    {booking.selectedDate ? "Select a Time" : "Please select a date first"}
+  </h2>
+  {booking.selectedDate && (
+    <div className="time-slots-grid grid grid-cols-3 gap-2 md:gap-3">
+      {booking.availableTimeSlots.map((slot, index) => (
+        slot.isLoading ? (
+          <div key="loading" className="p-3 text-center border rounded-md bg-gray-100">
+            <span className="text-gray-500">Loading...</span>
           </div>
+        ) : slot.isError ? (
+          <div key="error" className="p-3 text-center border rounded-md bg-red-50">
+            <span className="text-red-500">Error loading slots</span>
+          </div>
+        ) : (
+          <div 
+            key={index}
+            className={`time-slot p-3 text-center border rounded-md 
+              ${!slot.available ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'cursor-pointer hover:bg-blue-100'} 
+              ${booking.selectedTime === slot.value ? 'selected' : ''}`}
+            onClick={() => slot.available && booking.handleTimeSelect(slot.value)}
+          >
+            {slot.display}
+          </div>
+        )
+      ))}
+    </div>
+  )}
+</div>
         </div>
         
         {/* Form Container */}
@@ -362,6 +292,50 @@ function OfficeCleaningForm() {
             {/* Address Lookup Component */}
             <AddressLookup onAddressSelect={handleAddressSelect} />
             
+            {/* Property Access - New section */}
+            <div className="fs-section-title text-lg text-blue-600 font-medium mb-2 pb-2 border-b">
+              Property Access
+            </div>
+            
+            <div className="grid grid-cols-1 gap-4 mb-4">
+              <div className="fs-field">
+                <label className="fs-label block text-gray-700 mb-1" htmlFor="access">
+                  How will we access the property?
+                </label>
+                <select 
+                  className="fs-select w-full p-2 border rounded-lg" 
+                  id="access" 
+                  name="access"
+                  value={formData.access}
+                  onChange={handleInputChange}
+                  required
+                >
+                  <option value="" disabled>Select access method</option>
+                  <option value="home">Someone will be present</option>
+                  <option value="key">Key will be left in a location</option>
+                </select>
+              </div>
+              
+              {/* Conditional key location field */}
+              {formData.access === "key" && (
+                <div className="fs-field">
+                  <label className="fs-label block text-gray-700 mb-1" htmlFor="keyLocation">
+                    Please specify where the key will be located
+                  </label>
+                  <input 
+                    className="fs-input w-full p-2 border rounded-lg" 
+                    type="text" 
+                    id="keyLocation" 
+                    name="keyLocation"
+                    value={formData.keyLocation}
+                    onChange={handleInputChange}
+                    placeholder="e.g., Reception desk, security office, etc."
+                    required 
+                  />
+                </div>
+              )}
+            </div>
+            
             {/* Office Details */}
             <div className="fs-section-title text-lg text-blue-600 font-medium mb-2 pb-2 border-b">
               Office Details
@@ -386,8 +360,10 @@ function OfficeCleaningForm() {
                   <option value="2">2</option>
                   <option value="3">3</option>
                   <option value="4">4</option>
-                  <option value="5">5-8</option>
-                  <option value="9">9+</option>
+                  <option value="5">5</option>
+                  <option value="6">6</option>
+                  <option value="7">7</option>
+                  <option value="8">8</option>
                 </select>
               </div>
               
@@ -429,7 +405,7 @@ function OfficeCleaningForm() {
                   <option value="1">1</option>
                   <option value="2">2</option>
                   <option value="3">3</option>
-                  <option value="4">4+</option>
+                  <option value="4">4</option>
                 </select>
               </div>
               
@@ -471,7 +447,8 @@ function OfficeCleaningForm() {
                   <option value="0">0</option>
                   <option value="1">1</option>
                   <option value="2">2</option>
-                  <option value="3">3+</option>
+                  <option value="3">3</option>
+                  <option value="4">4</option>
                 </select>
               </div>
               
@@ -492,28 +469,73 @@ function OfficeCleaningForm() {
                   <option value="1">1</option>
                   <option value="2">2</option>
                   <option value="3">3</option>
-                  <option value="4">4+</option>
+                  <option value="4">4</option>
+                  <option value="5">5</option>
+                  <option value="6">6</option>
+                  <option value="7">7</option>
                 </select>
               </div>
             </div>
-
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+              {/* Added utility rooms dropdown */}
+              <div className="fs-field">
+                <label className="fs-label block text-gray-700 mb-1" htmlFor="utilityRooms">
+                  How many utility rooms?
+                </label>
+                <select 
+                  className="fs-select w-full p-2 border rounded-lg" 
+                  id="utilityRooms" 
+                  name="utilityRooms"
+                  value={formData.utilityRooms}
+                  onChange={handleInputChange}
+                  required
+                >
+                  <option value="0">0</option>
+                  <option value="1">1</option>
+                  <option value="2">2</option>
+                  <option value="3">3</option>
+                  <option value="4">4</option>
+                </select>
+              </div>
+              
+              <div className="fs-field">
+                <label className="fs-label block text-gray-700 mb-1" htmlFor="cleanliness">
+                  How dirty is the office?
+                </label>
+                <select 
+                  className="fs-select w-full p-2 border rounded-lg" 
+                  id="cleanliness" 
+                  name="cleanliness"
+                  value={formData.cleanliness}
+                  onChange={handleInputChange}
+                  required
+                >
+                  <option value="" disabled>Select cleanliness level</option>
+                  <option value="quite-clean">Quite clean</option>
+                  <option value="average">Average</option>
+                  <option value="quite-dirty">Quite dirty</option>
+                  <option value="filthy">Filthy</option>
+                </select>
+              </div>
+            </div>
+            
+            {/* Added products dropdown */}
             <div className="fs-field mb-4">
-              <label className="fs-label block text-gray-700 mb-1" htmlFor="cleanliness">
-                How dirty is the office?
+              <label className="fs-label block text-gray-700 mb-1" htmlFor="products">
+                Cleaning Products
               </label>
               <select 
                 className="fs-select w-full p-2 border rounded-lg" 
-                id="cleanliness" 
-                name="cleanliness"
-                value={formData.cleanliness}
+                id="products" 
+                name="products"
+                value={formData.products}
                 onChange={handleInputChange}
                 required
               >
-                <option value="" disabled>Select cleanliness level</option>
-                <option value="quite-clean">Quite clean</option>
-                <option value="average">Average</option>
-                <option value="quite-dirty">Quite dirty</option>
-                <option value="filthy">Filthy</option>
+                <option value="" disabled>Select option</option>
+                <option value="bring">Bring our products</option>
+                <option value="customer">Use office's products</option>
               </select>
             </div>
             
@@ -693,15 +715,24 @@ function OfficeCleaningForm() {
                 <span id="addons-price">£{priceBreakdown.addonsPrice}</span>
               </div>
               <div className="fs-price-total flex justify-between pt-2 border-t mt-2 text-blue-600 font-medium">
-                <span>Total:</span>
+                <span>Estimated Total:</span>
                 <span id="total-price-display">£{priceBreakdown.totalPrice}</span>
               </div>
               <div className="fs-price-item flex justify-between mt-2 italic">
                 <span>Estimated time:</span>
                 <span id="estimated-time">{priceBreakdown.estimatedHours} hour{priceBreakdown.estimatedHours !== 1 ? 's' : ''}</span>
               </div>
+
+                {/* New cleaner assignment note */}
+  {priceBreakdown.assignTwoCleaners && (
+    <div className="mt-2 p-2 bg-blue-50 text-blue-700 rounded text-sm">
+      <span className="font-bold">✓ Two cleaners assigned:</span> This job will be completed in approximately {priceBreakdown.adjustedHours} hours.
+    </div>
+  )}
             </div>
             
+            
+
             {/* Submit Button */}
             <div className="fs-button-group">
               <button 

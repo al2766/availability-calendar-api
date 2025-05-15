@@ -10,7 +10,8 @@ export const formatDateLocal = (date) => {
   return `${year}-${month}-${day}`;
 };
 
-export const formatDisplayDate = (dateStr, monthNames) => {
+// In bookingFormUtils.js
+export const formatDisplayDate = (dateStr, monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]) => {
   if (!dateStr) return "No date selected";
   const [year, month, day] = dateStr.split('-');
   return `Selected Date: ${day} ${monthNames[parseInt(month) - 1]} ${year}`;
@@ -61,16 +62,44 @@ export const hasConsecutiveAvailableHours = (bookedTimeSlots, requiredConsecutiv
   return false;
 };
 
+// In bookingFormUtils.js - Modify the existing updateTimeSlots function:
+
 export const updateTimeSlots = async (dateStr, startTime, estimatedHours, bookingInfo) => {
   try {
     console.log(`Updating time slots for ${dateStr}, starting at ${startTime} for ${estimatedHours} hours`);
+    console.log("Booking info:", bookingInfo);
     
     // Get existing data for this date, if any
     const dateRef = doc(db, "unavailability", dateStr);
     const dateDoc = await getDoc(dateRef);
     const existingData = dateDoc.exists() ? dateDoc.data() : {};
     
-    // Calculate which time slots will be booked
+    // CRITICAL FIX: Get original hours and assignment status from bookingInfo if available
+    // This handles the case where the estimatedHours is already adjusted for 2 cleaners
+    let originalHours = bookingInfo.originalHours || estimatedHours;
+    let assignTwoCleaners = bookingInfo.assignTwoCleaners || false;
+    
+    // If assignTwoCleaners isn't explicitly provided, check based on original hours
+    if (!assignTwoCleaners) {
+      try {
+        const settingsDoc = await getDoc(doc(db, "settings", "availability"));
+        const settings = settingsDoc.exists() ? settingsDoc.data() : {};
+        
+        // Using originalHours for the check, not adjusted estimatedHours
+        if (settings.assignTwoCleanersAfterHours > 0 && 
+            originalHours > settings.assignTwoCleanersAfterHours) {
+          assignTwoCleaners = true;
+          console.log(`Job requires 2 cleaners based on original hours: ${originalHours} > ${settings.assignTwoCleanersAfterHours}`);
+        }
+      } catch (error) {
+        console.error("Error getting cleaner assignment settings:", error);
+      }
+    } else {
+      console.log(`Job already flagged as requiring 2 cleaners`);
+    }
+    
+    // Calculate which time slots will be booked - using the provided estimatedHours
+    // which might already be adjusted for 2 cleaners
     const newBookedSlots = calculateBookedTimeSlots(startTime, estimatedHours);
     console.log("New booked slots:", newBookedSlots);
     
@@ -101,7 +130,13 @@ export const updateTimeSlots = async (dateStr, startTime, estimatedHours, bookin
         additionalInfo: bookingInfo.additionalInfo,
         address: bookingInfo.address,
         // Include service type if specified
-        ...(bookingInfo.service ? { service: bookingInfo.service } : {})
+        ...(bookingInfo.service ? { service: bookingInfo.service } : {}),
+        
+        // FIXED: Store accurate staff assignment information
+        assignTwoCleaners: assignTwoCleaners,
+        originalHours: originalHours, // Store the true original hours, not adjusted
+        actualHours: assignTwoCleaners ? Math.ceil(originalHours / 1.75) : originalHours, // Adjusted hours
+        staffRequired: assignTwoCleaners ? 2 : 1, // Explicitly store staff requirement
       };
     });
     
@@ -225,6 +260,224 @@ export const notifyZapier = async (booking, bookingInfo, formData, selectedAddOn
   }
 };
 
+export const calculatePrice = async (serviceType, formData, additionalItems, addOns) => {
+  const hourlyRate = 28; // £28 per hour
+  let baseHours = 0;
+  let additionalItemsHours = 0;
+  let addonsCost = 0;
+  let dirtinessMultiplier = 1;
+  let assignTwoCleaners = false;
+  
+  // Get the assignTwoCleanersAfterHours setting
+  let assignTwoCleanersThreshold = 4; // Default to 4 hours
+  try {
+    const settingsDoc = await getDoc(doc(db, "settings", "availability"));
+    if (settingsDoc.exists()) {
+      assignTwoCleanersThreshold = settingsDoc.data().assignTwoCleanersAfterHours || 4;
+    }
+  } catch (error) {
+    console.error("Error getting cleaner assignment settings:", error);
+  }
+  
+  // Handle Home Cleaning calculation
+  if (serviceType === "home-cleaning") {
+    // Base hours calculation based on property size
+    const bedrooms = parseInt(formData.bedrooms) || 0;
+    const livingRooms = parseInt(formData.livingRooms) || 0;
+    const kitchens = parseInt(formData.kitchens) || 0;
+    const bathrooms = parseInt(formData.bathrooms) || 0;
+    const utilityRooms = parseInt(formData.utilityRooms) || 0;
+    
+    // Calculate base hours
+    baseHours += bedrooms * 0.75; // 45 mins per bedroom
+    baseHours += livingRooms * 0.5; // 30 mins per living room
+    baseHours += kitchens * 1.0; // 1 hour per kitchen
+    baseHours += bathrooms * 0.75; // 45 mins per bathroom
+    baseHours += utilityRooms * 0.5; // 30 mins per utility room
+    
+    // Minimum base hours
+    baseHours = Math.max(baseHours, 2); // At least 2 hours
+    
+    // Calculate additional rooms hours
+    if (additionalItems && additionalItems.length > 0) {
+      additionalItems.forEach(room => {
+        if (room === "garage") {
+          additionalItemsHours += 0.5; // 30 mins for garage
+        } else if (room === "dining-room") {
+          additionalItemsHours += 0.5; // 30 mins for dining room
+        } else if (room === "conservatory") {
+          additionalItemsHours += 0.75; // 45 mins for conservatory
+        }
+      });
+    }
+    
+    // Apply dirtiness multiplier
+    const cleanliness = formData.cleanliness;
+    if (cleanliness === "quite-clean") {
+      dirtinessMultiplier = 1;
+    } else if (cleanliness === "average") {
+      dirtinessMultiplier = 1.2;
+    } else if (cleanliness === "quite-dirty") {
+      dirtinessMultiplier = 1.5;
+    } else if (cleanliness === "filthy") {
+      dirtinessMultiplier = 2;
+    }
+    
+    // Apply dirtiness multiplier
+    baseHours *= dirtinessMultiplier;
+    
+    // Calculate add-ons cost
+    if (addOns && addOns.length > 0) {
+      addOns.forEach(addon => {
+        addonsCost += addon.price || 0;
+      });
+    }
+    
+    // Calculate original hours before 2-cleaner adjustment
+    let totalHours = Math.ceil(baseHours + additionalItemsHours);
+    let originalHours = totalHours; // Store original hours for reference
+    
+    // Check if we need to assign 2 cleaners (if job exceeds threshold)
+    if (totalHours > assignTwoCleanersThreshold) {
+      assignTwoCleaners = true;
+      
+      // Adjust time by dividing by 1.75 (2 cleaners complete job faster)
+      totalHours = Math.ceil(totalHours / 1.75);
+    }
+    
+    // Calculate costs
+    const basePrice = Math.ceil(baseHours) * hourlyRate;
+    const roomsPrice = Math.ceil(additionalItemsHours) * hourlyRate;
+    const totalPrice = basePrice + roomsPrice + addonsCost;
+    
+    // Return the price breakdown
+    return {
+      basePrice: basePrice.toFixed(2),
+      roomsPrice: roomsPrice.toFixed(2),
+      addonsPrice: addonsCost.toFixed(2),
+      totalPrice: totalPrice.toFixed(2),
+      estimatedHours: totalHours,
+      originalHours: originalHours,
+      assignTwoCleaners: assignTwoCleaners
+    };
+  } 
+  // Handle Office Cleaning calculation
+  else if (serviceType === "office-cleaning") {
+    // Base hours calculation based on office size and rooms
+    const officeRooms = parseInt(formData.officeRooms) || 0;
+    const meetingRooms = parseInt(formData.meetingRooms) || 0;
+    const kitchens = parseInt(formData.kitchens) || 0;
+    const bathrooms = parseInt(formData.bathrooms) || 0;
+    const utilityRooms = parseInt(formData.utilityRooms) || 0;
+    
+    // Office rooms calculation based on size category
+    if (officeRooms > 0) {
+      // Adjust hours based on office size
+      const roomSizeMultiplier = 
+        formData.officeSize === "small" ? 0.5 :  // Small: 30 mins per office
+        formData.officeSize === "medium" ? 0.75 : // Medium: 45 mins per office
+        formData.officeSize === "large" ? 1.0 : 0.75; // Large: 1 hour per office, default to medium
+      
+      baseHours += officeRooms * roomSizeMultiplier;
+    }
+    
+    // Meeting rooms calculation based on size category
+    if (meetingRooms > 0) {
+      const meetingSizeMultiplier = 
+        formData.meetingRoomSize === "small" ? 0.5 :  // Small: 30 mins per meeting room
+        formData.meetingRoomSize === "medium" ? 0.75 : // Medium: 45 mins per meeting room
+        formData.meetingRoomSize === "large" ? 1.25 : 0.75; // Large: 1 hour 15 mins per meeting room, default to medium
+      
+      baseHours += meetingRooms * meetingSizeMultiplier;
+    }
+    
+    // Add time for kitchens, bathrooms, and utility rooms
+    baseHours += kitchens * 1.0; // 1 hour per kitchen
+    baseHours += bathrooms * 0.5; // 30 mins per bathroom
+    baseHours += utilityRooms * 0.5; // 30 mins per utility room
+    
+    // Minimum base hours
+    baseHours = Math.max(baseHours, 2); // At least 2 hours
+    
+    // Apply dirtiness multiplier
+    const cleanliness = formData.cleanliness;
+    if (cleanliness === "quite-clean") {
+      dirtinessMultiplier = 1;
+    } else if (cleanliness === "average") {
+      dirtinessMultiplier = 1.2;
+    } else if (cleanliness === "quite-dirty") {
+      dirtinessMultiplier = 1.5;
+    } else if (cleanliness === "filthy") {
+      dirtinessMultiplier = 2;
+    }
+    
+    // Apply dirtiness multiplier
+    baseHours *= dirtinessMultiplier;
+    
+    // Calculate additional areas hours
+    if (additionalItems && additionalItems.length > 0) {
+      additionalItems.forEach(area => {
+        if (area === "reception") {
+          additionalItemsHours += 0.5; // 30 mins for reception
+        } else if (area === "waiting-area") {
+          additionalItemsHours += 0.5; // 30 mins for waiting area
+        } else if (area === "stairwell") {
+          additionalItemsHours += 0.75; // 45 mins for stairwell
+        } else if (area === "hallways") {
+          additionalItemsHours += 0.5; // 30 mins for hallways
+        }
+      });
+    }
+    
+    // Calculate add-ons cost
+    if (addOns && addOns.length > 0) {
+      addOns.forEach(addon => {
+        addonsCost += addon.price || 0;
+      });
+    }
+    
+    // Calculate original hours before 2-cleaner adjustment
+    let totalHours = Math.ceil(baseHours + additionalItemsHours);
+    let originalHours = totalHours; // Store original hours for reference
+    
+    // Check if we need to assign 2 cleaners (if job exceeds threshold)
+    if (totalHours > assignTwoCleanersThreshold) {
+      assignTwoCleaners = true;
+      
+      // Adjust time by dividing by 1.75 (2 cleaners complete job faster)
+      totalHours = Math.ceil(totalHours / 1.75);
+    }
+    
+    // Calculate costs
+    const basePrice = Math.ceil(baseHours) * hourlyRate;
+    const additionalAreasPrice = Math.ceil(additionalItemsHours) * hourlyRate;
+    const totalPrice = basePrice + additionalAreasPrice + addonsCost;
+    
+    // Return the price breakdown
+    return {
+      basePrice: basePrice.toFixed(2),
+      additionalAreasPrice: additionalAreasPrice.toFixed(2),
+      addonsPrice: addonsCost.toFixed(2),
+      totalPrice: totalPrice.toFixed(2),
+      estimatedHours: totalHours,
+      originalHours: originalHours,
+      assignTwoCleaners: assignTwoCleaners
+    };
+  }
+  
+  // Default return (should never reach here)
+  return {
+    basePrice: "0.00",
+    additionalAreasPrice: "0.00",
+    roomsPrice: "0.00",
+    addonsPrice: "0.00",
+    totalPrice: "0.00",
+    estimatedHours: 0,
+    originalHours: 0,
+    assignTwoCleaners: false
+  };
+};
+
 // Common form submission function
 export const handleFormSubmission = async (e, booking, selectedDate, selectedTime, formData, additionalItems, addOns, priceBreakdown, serviceType, resetFormFunction) => {
   e.preventDefault();
@@ -239,6 +492,11 @@ export const handleFormSubmission = async (e, booking, selectedDate, selectedTim
     return;
   }
   
+  if (booking.staffLimitedSelected && priceBreakdown.estimatedHours > 4) {
+    alert("Due to limited staff availability at this time, only bookings of 4 hours or less can be accommodated.");
+    return;
+  }
+
   // Get submit button
   const submitButton = document.getElementById("submit-btn");
   submitButton.disabled = true;
@@ -260,7 +518,7 @@ export const handleFormSubmission = async (e, booking, selectedDate, selectedTim
       formData.address.postcode
     ].filter(Boolean).join(", ");
     
-    // Prepare booking info
+    // Prepare booking info - CRITICAL FIX: Include original hours and two cleaner flag
     const bookingInfo = {
       service: serviceType, // Specify service type
       email: formData.email,
@@ -280,7 +538,12 @@ export const handleFormSubmission = async (e, booking, selectedDate, selectedTim
       additionalRooms: additionalItems.join(", ") || "None",
       addOns: selectedAddOns.join(", ") || "None",
       totalPrice: priceBreakdown.totalPrice,
-      estimatedHours: priceBreakdown.estimatedHours,
+      estimatedHours: priceBreakdown.estimatedHours, // This might be adjusted hours
+      
+      // CRITICAL FIX: Add these fields to ensure staff assignment works correctly
+      originalHours: priceBreakdown.originalHours || priceBreakdown.estimatedHours, // Original hours before adjusting for 2 cleaners
+      assignTwoCleaners: priceBreakdown.assignTwoCleaners || false, // Flag whether this booking needs 2 cleaners
+      
       additionalInfo: formData.additionalInfo ?? null,
       
       // Office-specific fields if they exist
@@ -290,6 +553,8 @@ export const handleFormSubmission = async (e, booking, selectedDate, selectedTim
       meetingRoomSize: formData.meetingRoomSize,
       additionalAreas: additionalItems.join(", ") || "None"
     };
+    
+    console.log("BOOKING INFO - hours:", bookingInfo.estimatedHours, "original:", bookingInfo.originalHours, "2 cleaners:", bookingInfo.assignTwoCleaners);
     
     // STEP 1: Update the time slots in Firebase
     try {

@@ -1,11 +1,13 @@
 // src/forms/HomeCleaningForm.js
 import React, { useState, useEffect } from "react";
+import { collection, getDocs, setDoc, deleteDoc, doc, deleteField, getDoc } from "firebase/firestore";
+import { db } from "../firebase";
 import Calendar from "react-calendar";
 import "react-calendar/dist/Calendar.css";
 import "../App.css";
 import useBookingLogic from "../hooks/useBookingLogic";
 import AddressLookup from "../components/AddressLookup";
-import { handleFormSubmission } from "../utils/bookingFormUtils";
+import { handleFormSubmission, calculatePrice } from "../utils/bookingFormUtils";
 
 function HomeCleaningForm() {
   // Use the shared booking logic
@@ -20,8 +22,12 @@ function HomeCleaningForm() {
     livingRooms: "",
     kitchens: "",
     bathrooms: "",
+    utilityRooms: "0", // Added utility rooms as separate field
     cleanliness: "",
     additionalInfo: "",
+    access: "", // Added property access field
+    keyLocation: "", // Added key location field
+    products: "", // Added products field
     // Add address fields to formData
     address: {
       line1: "",
@@ -71,7 +77,7 @@ function HomeCleaningForm() {
       line2: selectedAddress.line2 || "",
       town: selectedAddress.town || "",
       county: selectedAddress.county || "",
-      postcode: selectedAddress.postcode || "" // Make sure postcode is included
+      postcode: selectedAddress.postcode || ""
     };
     
     // Save to form data
@@ -111,76 +117,111 @@ function HomeCleaningForm() {
   };
   
   // Calculate price based on form inputs for home cleaning
-  const calculatePrice = () => {
-    const hourlyRate = 28; // £28 per hour
-    let baseHours = 0;
-    let additionalRoomsHours = 0;
-    let addonsCost = 0;
-    let dirtinessMultiplier = 1;
-    
-    // Base hours calculation based on property size
-    const bedrooms = parseInt(formData.bedrooms) || 0;
-    const livingRooms = parseInt(formData.livingRooms) || 0;
-    const kitchens = parseInt(formData.kitchens) || 0;
-    const bathrooms = parseInt(formData.bathrooms) || 0;
-    
-    // Calculate base hours
-    baseHours += bedrooms * 0.75; // 45 mins per bedroom
-    baseHours += livingRooms * 0.5; // 30 mins per living room
-    baseHours += kitchens * 1.0; // 1 hour per kitchen
-    baseHours += bathrooms * 0.75; // 45 mins per bathroom
-    
-    // Minimum base hours
-    baseHours = Math.max(baseHours, 2); // At least 2 hours
-    
-    // Dirtiness multiplier
-    const cleanliness = formData.cleanliness;
-    if (cleanliness === "quite-clean") {
-      dirtinessMultiplier = 1;
-    } else if (cleanliness === "average") {
-      dirtinessMultiplier = 1.2;
-    } else if (cleanliness === "quite-dirty") {
-      dirtinessMultiplier = 1.5;
-    } else if (cleanliness === "filthy") {
-      dirtinessMultiplier = 2;
+ // Calculate price based on form inputs for home cleaning
+// Calculate price based on form inputs for home cleaning
+const calculatePrice = async () => {
+  const hourlyRate = 28; // £28 per hour
+  let baseHours = 0;
+  let additionalRoomsHours = 0;
+  let addonsCost = 0;
+  let dirtinessMultiplier = 1;
+  let assignTwoCleaners = false;
+  
+  // Get the assignTwoCleanersAfterHours setting
+  let assignTwoCleanersThreshold = 4; // Default to 4 hours
+  try {
+    const settingsDoc = await getDoc(doc(db, "settings", "availability"));
+    if (settingsDoc.exists()) {
+      assignTwoCleanersThreshold = settingsDoc.data().assignTwoCleanersAfterHours || 4;
     }
+  } catch (error) {
+    console.error("Error getting cleaner assignment settings:", error);
+  }
+  
+  // Base hours calculation based on property size
+  const bedrooms = parseInt(formData.bedrooms) || 0;
+  const livingRooms = parseInt(formData.livingRooms) || 0;
+  const kitchens = parseInt(formData.kitchens) || 0;
+  const bathrooms = parseInt(formData.bathrooms) || 0;
+  const utilityRooms = parseInt(formData.utilityRooms) || 0;
+  
+  // Calculate base hours
+  baseHours += bedrooms * 0.75; // 45 mins per bedroom
+  baseHours += livingRooms * 0.5; // 30 mins per living room
+  baseHours += kitchens * 1.0; // 1 hour per kitchen
+  baseHours += bathrooms * 0.75; // 45 mins per bathroom
+  baseHours += utilityRooms * 0.5; // 30 mins per utility room
+  
+  // Minimum base hours
+  baseHours = Math.max(baseHours, 2); // At least 2 hours
+  
+  // Dirtiness multiplier
+  const cleanliness = formData.cleanliness;
+  if (cleanliness === "quite-clean") {
+    dirtinessMultiplier = 1;
+  } else if (cleanliness === "average") {
+    dirtinessMultiplier = 1.2;
+  } else if (cleanliness === "quite-dirty") {
+    dirtinessMultiplier = 1.5;
+  } else if (cleanliness === "filthy") {
+    dirtinessMultiplier = 2;
+  }
+  
+  // Apply dirtiness multiplier
+  baseHours *= dirtinessMultiplier;
+  
+  // Calculate additional rooms hours
+  additionalRooms.forEach(room => {
+    if (room === "garage") {
+      additionalRoomsHours += 0.5; // 30 mins for garage
+    } else if (room === "dining-room") {
+      additionalRoomsHours += 0.5; // 30 mins for dining room
+    } else if (room === "conservatory") {
+      additionalRoomsHours += 0.75; // 45 mins for conservatory
+    }
+  });
+  
+  // Calculate add-ons cost
+  addOns.forEach(addon => {
+    addonsCost += addon.price || 0;
+  });
+  
+  // Calculate original hours before 2-cleaner adjustment
+  let totalHours = Math.ceil(baseHours + additionalRoomsHours);
+  let originalHours = totalHours; // Store original hours for reference
+  
+  // Calculate base price before any cleaner adjustments
+  let basePrice = Math.ceil(baseHours) * hourlyRate;
+  let roomsPrice = Math.ceil(additionalRoomsHours) * hourlyRate;
+  let totalPrice = basePrice + roomsPrice + addonsCost;
+  let originalPrice = totalPrice; // Store original price for reference
+  
+  // Check if we need to assign 2 cleaners (if job exceeds threshold)
+  if (totalHours > assignTwoCleanersThreshold) {
+    assignTwoCleaners = true;
     
-    // Apply dirtiness multiplier
-    baseHours *= dirtinessMultiplier;
+    // Adjust time by dividing by 1.75 (2 cleaners complete job faster)
+    totalHours = Math.ceil(totalHours / 1.75);
     
-    // Calculate additional rooms hours
-    additionalRooms.forEach(room => {
-      if (room === "garage") {
-        additionalRoomsHours += 0.5; // 30 mins for garage
-      } else if (room === "dining-room") {
-        additionalRoomsHours += 0.5; // 30 mins for dining room
-      } else if (room === "conservatory") {
-        additionalRoomsHours += 0.75; // 45 mins for conservatory
-      } else if (room === "utility-room") {
-        additionalRoomsHours += 0.5; // 30 mins for utility room
-      }
-    });
-    
-    // Calculate add-ons cost
-    addOns.forEach(addon => {
-      addonsCost += addon.price || 0;
-    });
-    
-    // Calculate costs
-    const basePrice = Math.ceil(baseHours) * hourlyRate;
-    const roomsPrice = Math.ceil(additionalRoomsHours) * hourlyRate;
-    const totalHours = Math.ceil(baseHours + additionalRoomsHours);
-    const totalPrice = basePrice + roomsPrice + addonsCost;
-    
-    // Update price breakdown
-    setPriceBreakdown({
-      basePrice: basePrice.toFixed(2),
-      roomsPrice: roomsPrice.toFixed(2),
-      addonsPrice: addonsCost.toFixed(2),
-      totalPrice: totalPrice.toFixed(2),
-      estimatedHours: totalHours
-    });
-  };
+    // Adjust the price proportionally
+    const priceReductionFactor = totalHours / originalHours;
+    basePrice = Math.ceil(basePrice * priceReductionFactor);
+    roomsPrice = Math.ceil(roomsPrice * priceReductionFactor);
+    totalPrice = basePrice + roomsPrice + addonsCost;
+  }
+  
+  // Update price breakdown
+  setPriceBreakdown({
+    basePrice: basePrice.toFixed(2),
+    roomsPrice: roomsPrice.toFixed(2),
+    addonsPrice: addonsCost.toFixed(2),
+    totalPrice: totalPrice.toFixed(2),
+    estimatedHours: totalHours,
+    originalHours: originalHours,
+    originalPrice: originalPrice.toFixed(2),
+    assignTwoCleaners: assignTwoCleaners
+  });
+};
   
   // Reset form function
   const resetForm = () => {
@@ -192,8 +233,12 @@ function HomeCleaningForm() {
       livingRooms: "",
       kitchens: "",
       bathrooms: "",
+      utilityRooms: "0",
       cleanliness: "",
       additionalInfo: "",
+      access: "",
+      keyLocation: "",
+      products: "",
       address: {
         line1: "",
         line2: "",
@@ -253,27 +298,48 @@ function HomeCleaningForm() {
             />
           )}
           
-          {/* Time Slot Container */}
-          <div className="time-slot-container mt-6 p-6 bg-white rounded-lg">
-            <h2 className="time-slot-title text-lg text-blue-600 font-medium mb-4">
-              {booking.selectedDate ? "Select a Time" : "Please select a date first"}
-            </h2>
-            {booking.selectedDate && (
-              <div className="time-slots-grid grid grid-cols-3 gap-2 md:gap-3">
-                {booking.availableTimeSlots.map((slot, index) => (
-                  <div 
-                    key={index}
-                    className={`time-slot p-3 text-center border rounded-md 
-                      ${!slot.available ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'cursor-pointer hover:bg-blue-100'} 
-                      ${booking.selectedTime === slot.value ? 'selected' : ''}`}
-                    onClick={() => slot.available && booking.handleTimeSelect(slot.value)}
-                  >
-                    {slot.display}
-                  </div>
-                ))}
-              </div>
-            )}
+       {/* Time Slot Container */}
+<div className="time-slot-container mt-6 p-6 bg-white rounded-lg">
+  <h2 className="time-slot-title text-lg text-blue-600 font-medium mb-4">
+    {booking.selectedDate ? "Select a Time" : "Please select a date first"}
+  </h2>
+  {booking.selectedDate && (
+    <div className="time-slots-grid grid grid-cols-3 gap-2 md:gap-3">
+      {booking.availableTimeSlots.map((slot, index) => (
+        slot.isLoading ? (
+          <div key="loading" className="p-3 text-center border rounded-md bg-gray-100">
+            <span className="text-gray-500">Loading...</span>
           </div>
+        ) : slot.isError ? (
+          <div key="error" className="p-3 text-center border rounded-md bg-red-50">
+            <span className="text-red-500">Error loading slots</span>
+          </div>
+        ) : (
+          <div 
+            key={index}
+            className={`time-slot p-3 text-center border rounded-md 
+              ${!slot.available ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'cursor-pointer hover:bg-blue-100'} 
+              ${booking.selectedTime === slot.value ? 'selected' : ''}`}
+            onClick={() => slot.available && booking.handleTimeSelect(slot.value)}
+          >
+            {slot.display}
+            
+          </div>
+          
+        )
+        
+      ))}
+    </div>
+    
+  )}{/* Add this right after the Time Slot Container div in both form files */}
+  {booking.staffLimitedSelected && (
+    <div className="p-3 mt-2 bg-yellow-50 text-yellow-700 border border-yellow-200 rounded-md">
+      <p className="text-sm">
+        <strong>Note:</strong> Limited cleaners available at this time. Bookings of 4 hours or less only.
+      </p>
+    </div>
+  )}
+</div>
         </div>
         
         {/* Form Container */}
@@ -339,6 +405,50 @@ function HomeCleaningForm() {
             {/* Address Lookup Component */}
             <AddressLookup onAddressSelect={handleAddressSelect} />
             
+            {/* Property Access - New section */}
+            <div className="fs-section-title text-lg text-blue-600 font-medium mb-2 pb-2 border-b">
+              Property Access
+            </div>
+            
+            <div className="grid grid-cols-1 gap-4 mb-4">
+              <div className="fs-field">
+                <label className="fs-label block text-gray-700 mb-1" htmlFor="access">
+                  How will we access the property?
+                </label>
+                <select 
+                  className="fs-select w-full p-2 border rounded-lg" 
+                  id="access" 
+                  name="access"
+                  value={formData.access}
+                  onChange={handleInputChange}
+                  required
+                >
+                  <option value="" disabled>Select access method</option>
+                  <option value="home">I will be home</option>
+                  <option value="key">Key will be left in a location</option>
+                </select>
+              </div>
+              
+              {/* Conditional key location field */}
+              {formData.access === "key" && (
+                <div className="fs-field">
+                  <label className="fs-label block text-gray-700 mb-1" htmlFor="keyLocation">
+                    Please specify where the key will be located
+                  </label>
+                  <input 
+                    className="fs-input w-full p-2 border rounded-lg" 
+                    type="text" 
+                    id="keyLocation" 
+                    name="keyLocation"
+                    value={formData.keyLocation}
+                    onChange={handleInputChange}
+                    placeholder="e.g., Under the plant pot, with neighbor, etc."
+                    required 
+                  />
+                </div>
+              )}
+            </div>
+            
             {/* Property Details */}
             <div className="fs-section-title text-lg text-blue-600 font-medium mb-2 pb-2 border-b">
               Property Details
@@ -363,7 +473,10 @@ function HomeCleaningForm() {
                   <option value="2">2</option>
                   <option value="3">3</option>
                   <option value="4">4</option>
-                  <option value="5">5+</option>
+                  <option value="5">5</option>
+                  <option value="6">6</option>
+                  <option value="7">7</option>
+                  <option value="8">8</option>
                 </select>
               </div>
               
@@ -383,7 +496,9 @@ function HomeCleaningForm() {
                   <option value="0">0</option>
                   <option value="1">1</option>
                   <option value="2">2</option>
-                  <option value="3">3+</option>
+                  <option value="3">3</option>
+                  <option value="4">4</option>
+                  <option value="5">5</option>
                 </select>
               </div>
             </div>
@@ -404,7 +519,9 @@ function HomeCleaningForm() {
                   <option value="" disabled>Select number of kitchens</option>
                   <option value="0">0</option>
                   <option value="1">1</option>
-                  <option value="2">2+</option>
+                  <option value="2">2</option>
+                  <option value="3">3</option>
+                  <option value="4">4</option>
                 </select>
               </div>
               
@@ -425,28 +542,73 @@ function HomeCleaningForm() {
                   <option value="1">1</option>
                   <option value="2">2</option>
                   <option value="3">3</option>
-                  <option value="4">4+</option>
+                  <option value="4">4</option>
+                  <option value="5">5</option>
+                  <option value="6">6</option>
+                  <option value="7">7</option>
                 </select>
               </div>
             </div>
             
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+              {/* Added utility rooms dropdown */}
+              <div className="fs-field">
+                <label className="fs-label block text-gray-700 mb-1" htmlFor="utilityRooms">
+                  How many utility rooms?
+                </label>
+                <select 
+                  className="fs-select w-full p-2 border rounded-lg" 
+                  id="utilityRooms" 
+                  name="utilityRooms"
+                  value={formData.utilityRooms}
+                  onChange={handleInputChange}
+                  required
+                >
+                  <option value="0">0</option>
+                  <option value="1">1</option>
+                  <option value="2">2</option>
+                  <option value="3">3</option>
+                  <option value="4">4</option>
+                </select>
+              </div>
+              
+              <div className="fs-field">
+                <label className="fs-label block text-gray-700 mb-1" htmlFor="cleanliness">
+                  How dirty is the property?
+                </label>
+                <select 
+                  className="fs-select w-full p-2 border rounded-lg" 
+                  id="cleanliness" 
+                  name="cleanliness"
+                  value={formData.cleanliness}
+                  onChange={handleInputChange}
+                  required
+                >
+                  <option value="" disabled>Select cleanliness level</option>
+                  <option value="quite-clean">Quite clean</option>
+                  <option value="average">Average</option>
+                  <option value="quite-dirty">Quite dirty</option>
+                  <option value="filthy">Filthy</option>
+                </select>
+              </div>
+            </div>
+            
+            {/* Added products dropdown */}
             <div className="fs-field mb-4">
-              <label className="fs-label block text-gray-700 mb-1" htmlFor="cleanliness">
-                How dirty is the property?
+              <label className="fs-label block text-gray-700 mb-1" htmlFor="products">
+                Cleaning Products
               </label>
               <select 
                 className="fs-select w-full p-2 border rounded-lg" 
-                id="cleanliness" 
-                name="cleanliness"
-                value={formData.cleanliness}
+                id="products" 
+                name="products"
+                value={formData.products}
                 onChange={handleInputChange}
                 required
               >
-                <option value="" disabled>Select cleanliness level</option>
-                <option value="quite-clean">Quite clean</option>
-                <option value="average">Average</option>
-                <option value="quite-dirty">Quite dirty</option>
-                <option value="filthy">Filthy</option>
+                <option value="" disabled>Select option</option>
+                <option value="bring">Bring our products</option>
+                <option value="customer">Use my products</option>
               </select>
             </div>
             
@@ -493,18 +655,7 @@ function HomeCleaningForm() {
                   />
                   <label htmlFor="conservatory" className="fs-checkbox-label">Conservatory</label>
                 </div>
-                <div className="fs-checkbox-item flex items-center">
-                  <input 
-                    type="checkbox" 
-                    id="utility-room" 
-                    name="additional-rooms[]" 
-                    value="utility-room" 
-                    className="fs-checkbox w-5 h-5 mr-2"
-                    checked={additionalRooms.includes("utility-room")}
-                    onChange={handleRoomCheckboxChange}
-                  />
-                  <label htmlFor="utility-room" className="fs-checkbox-label">Utility room</label>
-                </div>
+                {/* Utility room removed from here as it's now in the main form */}
               </div>
             </div>
             
@@ -656,29 +807,36 @@ function HomeCleaningForm() {
               ></textarea>
             </div>
             
-            {/* Price Breakdown */}
-            <div className="fs-price-breakdown bg-gray-50 p-4 rounded-lg mb-6">
-              <div className="fs-price-item flex justify-between mb-2">
-                <span>Base cleaning cost:</span>
-                <span id="base-price">£{priceBreakdown.basePrice}</span>
-              </div>
-              <div className="fs-price-item flex justify-between mb-2">
-                <span>Additional rooms:</span>
-                <span id="rooms-price">£{priceBreakdown.roomsPrice}</span>
-              </div>
-              <div className="fs-price-item flex justify-between mb-2">
-                <span>Add-on services:</span>
-                <span id="addons-price">£{priceBreakdown.addonsPrice}</span>
-              </div>
-              <div className="fs-price-total flex justify-between pt-2 border-t mt-2 text-blue-600 font-medium">
-                <span>Total:</span>
-                <span id="total-price-display">£{priceBreakdown.totalPrice}</span>
-              </div>
-              <div className="fs-price-item flex justify-between mt-2 italic">
-                <span>Estimated time:</span>
-                <span id="estimated-time">{priceBreakdown.estimatedHours} hour{priceBreakdown.estimatedHours !== 1 ? 's' : ''}</span>
-              </div>
-            </div>
+ {/* Price Breakdown */}
+<div className="fs-price-breakdown bg-gray-50 p-4 rounded-lg mb-6">
+  <div className="fs-price-item flex justify-between mb-2">
+    <span>Base cleaning cost:</span>
+    <span id="base-price">£{priceBreakdown.basePrice}</span>
+  </div>
+  <div className="fs-price-item flex justify-between mb-2">
+    <span>Additional rooms:</span>
+    <span id="rooms-price">£{priceBreakdown.roomsPrice}</span>
+  </div>
+  <div className="fs-price-item flex justify-between mb-2">
+    <span>Add-on services:</span>
+    <span id="addons-price">£{priceBreakdown.addonsPrice}</span>
+  </div>
+  <div className="fs-price-total flex justify-between pt-2 border-t mt-2 text-blue-600 font-medium">
+    <span>Total:</span>
+    <span id="total-price-display">£{priceBreakdown.totalPrice}</span>
+  </div>
+  <div className="fs-price-item flex justify-between mt-2 italic">
+    <span>Estimated time:</span>
+    <span id="estimated-time">{priceBreakdown.estimatedHours} hour{priceBreakdown.estimatedHours !== 1 ? 's' : ''}</span>
+  </div>
+  
+  {/* Cleaner assignment note - simplified */}
+  {priceBreakdown.assignTwoCleaners && (
+    <div className="mt-2 p-2 bg-blue-50 text-blue-700 rounded text-sm">
+      <span className="font-bold">✓ Two cleaners will be assigned to this booking</span>
+    </div>
+  )}
+</div>
             
             {/* Submit Button */}
             <div className="fs-button-group">

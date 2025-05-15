@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from "react";
+// Near the top of BookingForm.js with your other imports
+import { formatDateLocal, formatDisplayDate, updateTimeSlots } from "../utils/bookingFormUtils";
 import Calendar from "react-calendar";
 import "react-calendar/dist/Calendar.css";
 import { collection, getDocs, doc, getDoc, setDoc } from "firebase/firestore";
@@ -10,6 +12,7 @@ function BookingForm() {
   const [unavailableDates, setUnavailableDates] = useState(new Set());
   const [loading, setLoading] = useState(true);
   const [timeSlotData, setTimeSlotData] = useState({});
+  
   
   // Booking form states
   const [selectedDate, setSelectedDate] = useState(null);
@@ -55,13 +58,13 @@ function BookingForm() {
 
   useEffect(() => {
     fetchUnavailability();
-    generateTimeSlots();
+    booking.generateTimeSlots();
   }, []);
 
   // Update the useEffect hook to regenerate time slots when selectedDate changes
   useEffect(() => {
     if (selectedDate) {
-      generateTimeSlots(selectedDate);
+      booking.generateTimeSlots(selectedDate);
     }
   }, [selectedDate, timeSlotData]);
 
@@ -206,20 +209,7 @@ function BookingForm() {
     return false;
   };
 
-  // Format date to YYYY-MM-DD
-  const formatDateLocal = (date) => {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, "0");
-    const day = String(date.getDate()).padStart(2, "0");
-    return `${year}-${month}-${day}`;
-  };
-  
-  // Format date for display
-  const formatDisplayDate = (dateStr) => {
-    if (!dateStr) return "No date selected";
-    const [year, month, day] = dateStr.split('-');
-    return `Selected Date: ${day} ${monthNames[parseInt(month) - 1]} ${year}`;
-  };
+
 
   // Function to get min/max dates for calendar
   const getCalendarMinMaxDates = () => {
@@ -243,7 +233,7 @@ function BookingForm() {
       setSelectedDate(dateStr);
       
       // Call generateTimeSlots if it's not already being called elsewhere
-      generateTimeSlots(dateStr);
+      booking.generateTimeSlots(dateStr);
     }
   };
 
@@ -262,149 +252,9 @@ function BookingForm() {
     return parseInt(timeStr.split(':')[0]);
   };
 
-  // Check if a date has at least 2 consecutive hours available
-  const hasConsecutiveAvailableHours = (bookedTimeSlots, requiredConsecutiveHours = 2) => {
-    const allTimeSlots = generateAllTimeSlots();
-    
-    // Create an array representing all hours (true = available, false = booked)
-    const availabilityMap = allTimeSlots.map(slot => !bookedTimeSlots[slot]);
-    
-    // Debug output
-    console.log("Checking consecutive hours for:", bookedTimeSlots);
-    console.log("Availability map:", availabilityMap);
-    
-    // Check for consecutive available slots
-    let consecutiveCount = 0;
-    for (let i = 0; i < availabilityMap.length; i++) {
-      if (availabilityMap[i]) {
-        consecutiveCount++;
-        if (consecutiveCount >= requiredConsecutiveHours) {
-          console.log(`Found ${requiredConsecutiveHours} consecutive available hours`);
-          return true; // Found enough consecutive slots
-        }
-      } else {
-        consecutiveCount = 0;
-      }
-    }
-    
-    console.log("Not enough consecutive hours available");
-    return false;
-  };
+ 
 
-  // Calculate which time slots to mark as booked based on booking hours
-  const calculateBookedTimeSlots = (startTime, estimatedHours) => {
-    const bookedSlots = {};
-    const startHour = timeToHour(startTime);
-    
-    for (let i = 0; i < estimatedHours; i++) {
-      const hour = startHour + i;
-      if (hour >= 7 && hour <= 20) { // Only book slots within our available range (7am-8pm)
-        bookedSlots[`${hour}:00`] = true;
-      }
-    }
-    
-    return bookedSlots;
-  };
 
-  // Update time slots in Firebase when a booking is made
-  const updateTimeSlots = async (dateStr, startTime, estimatedHours, bookingInfo) => {
-    try {
-      console.log(`Updating time slots for ${dateStr}, starting at ${startTime} for ${estimatedHours} hours`);
-      
-      // Get existing data for this date, if any
-      const dateRef = doc(db, "unavailability", dateStr);
-      const dateDoc = await getDoc(dateRef);
-      const existingData = dateDoc.exists() ? dateDoc.data() : {};
-      
-      // Calculate which time slots will be booked
-      const newBookedSlots = calculateBookedTimeSlots(startTime, estimatedHours);
-      console.log("New booked slots:", newBookedSlots);
-      
-      // Merge with existing booked slots, if any
-      const existingBookedSlots = existingData.bookedTimeSlots || {};
-      console.log("Existing booked slots:", existingBookedSlots);
-      
-      const updatedBookedSlots = { ...existingBookedSlots };
-      
-      // Add the new booking information to each booked slot
-      Object.keys(newBookedSlots).forEach(timeSlot => {
-        updatedBookedSlots[timeSlot] = {
-          bookedBy: bookingInfo.email,
-          name: bookingInfo.name,
-          phone: bookingInfo.phone,
-          bookingId: bookingInfo.orderId,
-          bookingTimestamp: bookingInfo.timestamp,
-          // Include all relevant booking details for admin view
-          bedrooms: bookingInfo.bedrooms,
-          livingRooms: bookingInfo.livingRooms,
-          kitchens: bookingInfo.kitchens,
-          bathrooms: bookingInfo.bathrooms,
-          cleanliness: bookingInfo.cleanliness,
-          additionalRooms: bookingInfo.additionalRooms,
-          addOns: bookingInfo.addOns,
-          totalPrice: bookingInfo.totalPrice,
-          estimatedHours: bookingInfo.estimatedHours,
-          additionalInfo: bookingInfo.additionalInfo
-        };
-      });
-      
-      console.log("Updated booked slots:", updatedBookedSlots);
-      
-      // Check if this booking would leave at least 2 consecutive hours
-      const fullyBooked = !hasConsecutiveAvailableHours(updatedBookedSlots);
-      console.log(`After booking, date is ${fullyBooked ? 'fully booked' : 'partially available'}`);
-      
-      // Update in Firebase
-      await setDoc(dateRef, {
-        bookedTimeSlots: updatedBookedSlots,
-        fullyBooked
-      }, { merge: true });
-      
-      return { updatedBookedSlots, fullyBooked };
-    } catch (error) {
-      console.error("Error updating time slots:", error);
-      throw error;
-    }
-  };
-
-  // Generate time slots for UI
-  const generateTimeSlots = (date) => {
-    console.log(`Generating time slots for date: ${date}`);
-    
-    // If no date is selected, return empty slots
-    if (!date) {
-      setAvailableTimeSlots([]);
-      return;
-    }
-    
-    // Get the booked time slots for this date from timeSlotData
-    const bookedTimeSlotData = timeSlotData[date] || {};
-    console.log(`Booked slots for ${date}:`, bookedTimeSlotData);
-    
-    const slots = [];
-    
-    for (let hour = 7; hour <= 20; hour++) {
-      const timeSlot = `${hour}:00`;
-      // Check if this slot is booked
-      const isBooked = bookedTimeSlotData[timeSlot] ? true : false;
-      
-      // Check if this slot is in the past (for today)
-      const isPast = isPastTimeSlot(timeSlot, date);
-      
-      const displayHour = hour > 12 ? hour - 12 : hour;
-      const amPm = hour >= 12 ? 'PM' : 'AM';
-      
-      slots.push({
-        display: `${displayHour} ${amPm}`,
-        value: timeSlot,
-        available: !isBooked && !isPast,
-        isPast: isPast
-      });
-    }
-    
-    console.log(`Generated time slots for ${date}:`, slots);
-    setAvailableTimeSlots(slots);
-  };
 
   // Update time slot selection to only allow selecting available slots
   const handleTimeSelect = (time) => {
@@ -558,7 +408,7 @@ function BookingForm() {
         // Refresh time slots
         await fetchUnavailability();
         if (selectedDate) {
-          generateTimeSlots(selectedDate);
+          booking.generateTimeSlots(selectedDate);
         }
         return;
       }
@@ -1216,7 +1066,7 @@ const notifyZapier = async (bookingData) => {
                 <span id="addons-price">£{priceBreakdown.addonsPrice}</span>
               </div>
               <div className="fs-price-total flex justify-between pt-2 border-t mt-2 text-blue-600 font-medium">
-                <span>Total:</span>
+                <span>Estimated Total:</span>
                 <span id="total-price-display">£{priceBreakdown.totalPrice}</span>
               </div>
               <div className="fs-price-item flex justify-between mt-2 italic">
