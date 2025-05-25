@@ -110,8 +110,8 @@ export const updateTimeSlots = async (dateStr, startTime, estimatedHours, bookin
     const updatedBookedSlots = { ...existingBookedSlots };
     
     // Add the new booking information to each booked slot
-    Object.keys(newBookedSlots).forEach(timeSlot => {
-      updatedBookedSlots[timeSlot] = {
+Object.keys(newBookedSlots).forEach(timeSlot => {
+  updatedBookedSlots[`${timeSlot}-${bookingInfo.orderId}`] = {
         bookedBy: bookingInfo.email,
         name: bookingInfo.name,
         phone: bookingInfo.phone,
@@ -220,6 +220,14 @@ export const notifyZapier = async (booking, bookingInfo, formData, selectedAddOn
       totalPrice: priceBreakdown.totalPrice,
       additionalInfo: formData.additionalInfo || "None provided",
       submittedAt: formattedDate,
+
+      // Add the new fields with exact naming to match your Trello/Sheets setup
+      accessInstructions: formData.access === "home" ? "Customer will be present" : 
+                         formData.access === "key" ? `Key left at: ${formData.keyLocation || "N/A"}` : 
+                         "Not specified",
+      productPreference: formData.products === "bring" ? "Bring our products" : 
+                        formData.products === "customer" ? "Use customer's products" : 
+                        "Not specified",
       
       // Service-specific fields (adding all possible fields)
       bedrooms: formData.bedrooms,
@@ -264,7 +272,7 @@ export const calculatePrice = async (serviceType, formData, additionalItems, add
   const hourlyRate = 28; // £28 per hour
   let baseHours = 0;
   let additionalItemsHours = 0;
-  let addonsCost = 0;
+  let addonsHours = 0; // Changed from addonsCost to addonsHours
   let dirtinessMultiplier = 1;
   let assignTwoCleaners = false;
   
@@ -326,15 +334,16 @@ export const calculatePrice = async (serviceType, formData, additionalItems, add
     // Apply dirtiness multiplier
     baseHours *= dirtinessMultiplier;
     
-    // Calculate add-ons cost
+    // Calculate add-ons hours (convert prices to hours at £28/hour)
     if (addOns && addOns.length > 0) {
       addOns.forEach(addon => {
-        addonsCost += addon.price || 0;
+        const addonPrice = addon.price || 0;
+        addonsHours += addonPrice / hourlyRate; // Convert price to hours
       });
     }
     
     // Calculate original hours before 2-cleaner adjustment
-    let totalHours = Math.ceil(baseHours + additionalItemsHours);
+    let totalHours = Math.ceil(baseHours + additionalItemsHours + addonsHours);
     let originalHours = totalHours; // Store original hours for reference
     
     // Check if we need to assign 2 cleaners (if job exceeds threshold)
@@ -345,16 +354,17 @@ export const calculatePrice = async (serviceType, formData, additionalItems, add
       totalHours = Math.ceil(totalHours / 1.75);
     }
     
-    // Calculate costs
+    // Calculate costs - everything at hourly rate now
     const basePrice = Math.ceil(baseHours) * hourlyRate;
     const roomsPrice = Math.ceil(additionalItemsHours) * hourlyRate;
-    const totalPrice = basePrice + roomsPrice + addonsCost;
+    const addonsPrice = Math.ceil(addonsHours) * hourlyRate; // Now calculated at hourly rate
+    const totalPrice = basePrice + roomsPrice + addonsPrice;
     
     // Return the price breakdown
     return {
       basePrice: basePrice.toFixed(2),
       roomsPrice: roomsPrice.toFixed(2),
-      addonsPrice: addonsCost.toFixed(2),
+      addonsPrice: addonsPrice.toFixed(2),
       totalPrice: totalPrice.toFixed(2),
       estimatedHours: totalHours,
       originalHours: originalHours,
@@ -429,15 +439,16 @@ export const calculatePrice = async (serviceType, formData, additionalItems, add
       });
     }
     
-    // Calculate add-ons cost
+    // Calculate add-ons hours (convert prices to hours at £28/hour)
     if (addOns && addOns.length > 0) {
       addOns.forEach(addon => {
-        addonsCost += addon.price || 0;
+        const addonPrice = addon.price || 0;
+        addonsHours += addonPrice / hourlyRate; // Convert price to hours
       });
     }
     
     // Calculate original hours before 2-cleaner adjustment
-    let totalHours = Math.ceil(baseHours + additionalItemsHours);
+    let totalHours = Math.ceil(baseHours + additionalItemsHours + addonsHours);
     let originalHours = totalHours; // Store original hours for reference
     
     // Check if we need to assign 2 cleaners (if job exceeds threshold)
@@ -448,16 +459,17 @@ export const calculatePrice = async (serviceType, formData, additionalItems, add
       totalHours = Math.ceil(totalHours / 1.75);
     }
     
-    // Calculate costs
+    // Calculate costs - everything at hourly rate now
     const basePrice = Math.ceil(baseHours) * hourlyRate;
     const additionalAreasPrice = Math.ceil(additionalItemsHours) * hourlyRate;
-    const totalPrice = basePrice + additionalAreasPrice + addonsCost;
+    const addonsPrice = Math.ceil(addonsHours) * hourlyRate; // Now calculated at hourly rate
+    const totalPrice = basePrice + additionalAreasPrice + addonsPrice;
     
     // Return the price breakdown
     return {
       basePrice: basePrice.toFixed(2),
       additionalAreasPrice: additionalAreasPrice.toFixed(2),
-      addonsPrice: addonsCost.toFixed(2),
+      addonsPrice: addonsPrice.toFixed(2),
       totalPrice: totalPrice.toFixed(2),
       estimatedHours: totalHours,
       originalHours: originalHours,

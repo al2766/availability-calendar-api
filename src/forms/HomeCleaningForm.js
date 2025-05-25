@@ -22,7 +22,7 @@ function HomeCleaningForm() {
     livingRooms: "",
     kitchens: "",
     bathrooms: "",
-    utilityRooms: "0", // Added utility rooms as separate field
+    utilityRooms: "", // Added utility rooms as separate field
     cleanliness: "",
     additionalInfo: "",
     access: "", // Added property access field
@@ -123,7 +123,7 @@ const calculatePrice = async () => {
   const hourlyRate = 28; // £28 per hour
   let baseHours = 0;
   let additionalRoomsHours = 0;
-  let addonsCost = 0;
+  let addonsHours = 0; // Changed from addonsCost to addonsHours
   let dirtinessMultiplier = 1;
   let assignTwoCleaners = false;
   
@@ -181,20 +181,15 @@ const calculatePrice = async () => {
     }
   });
   
-  // Calculate add-ons cost
+  // Calculate add-ons hours (convert prices to hours at £28/hour)
   addOns.forEach(addon => {
-    addonsCost += addon.price || 0;
+    const addonPrice = addon.price || 0;
+    addonsHours += addonPrice / hourlyRate; // Convert price to hours
   });
   
   // Calculate original hours before 2-cleaner adjustment
-  let totalHours = Math.ceil(baseHours + additionalRoomsHours);
+  let totalHours = Math.ceil(baseHours + additionalRoomsHours + addonsHours);
   let originalHours = totalHours; // Store original hours for reference
-  
-  // Calculate base price before any cleaner adjustments
-  let basePrice = Math.ceil(baseHours) * hourlyRate;
-  let roomsPrice = Math.ceil(additionalRoomsHours) * hourlyRate;
-  let totalPrice = basePrice + roomsPrice + addonsCost;
-  let originalPrice = totalPrice; // Store original price for reference
   
   // Check if we need to assign 2 cleaners (if job exceeds threshold)
   if (totalHours > assignTwoCleanersThreshold) {
@@ -202,23 +197,23 @@ const calculatePrice = async () => {
     
     // Adjust time by dividing by 1.75 (2 cleaners complete job faster)
     totalHours = Math.ceil(totalHours / 1.75);
-    
-    // Adjust the price proportionally
-    const priceReductionFactor = totalHours / originalHours;
-    basePrice = Math.ceil(basePrice * priceReductionFactor);
-    roomsPrice = Math.ceil(roomsPrice * priceReductionFactor);
-    totalPrice = basePrice + roomsPrice + addonsCost;
   }
+  
+  // Calculate costs - everything at hourly rate now
+  const basePrice = Math.ceil(baseHours) * hourlyRate;
+  const roomsPrice = Math.ceil(additionalRoomsHours) * hourlyRate;
+  const addonsPrice = Math.ceil(addonsHours) * hourlyRate; // Now calculated at hourly rate
+  const totalPrice = basePrice + roomsPrice + addonsPrice;
   
   // Update price breakdown
   setPriceBreakdown({
     basePrice: basePrice.toFixed(2),
     roomsPrice: roomsPrice.toFixed(2),
-    addonsPrice: addonsCost.toFixed(2),
+    addonsPrice: addonsPrice.toFixed(2),
     totalPrice: totalPrice.toFixed(2),
     estimatedHours: totalHours,
     originalHours: originalHours,
-    originalPrice: originalPrice.toFixed(2),
+    originalPrice: totalPrice.toFixed(2), // Now same as totalPrice since everything is hourly
     assignTwoCleaners: assignTwoCleaners
   });
 };
@@ -564,6 +559,7 @@ const calculatePrice = async () => {
                   onChange={handleInputChange}
                   required
                 >
+                  <option value="" disabled>Select number of Utility rooms</option>
                   <option value="0">0</option>
                   <option value="1">1</option>
                   <option value="2">2</option>

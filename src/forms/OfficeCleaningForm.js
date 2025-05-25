@@ -24,7 +24,7 @@ function OfficeCleaningForm() {
     meetingRoomSize: "",
     kitchens: "",
     bathrooms: "",
-    utilityRooms: "0", // Added utility rooms as separate field
+    utilityRooms: "", // Added utility rooms as separate field
     cleanliness: "",
     additionalInfo: "",
     access: "", // Added property access field
@@ -491,6 +491,7 @@ function OfficeCleaningForm() {
                   onChange={handleInputChange}
                   required
                 >
+                  <option value="" disabled>Select number of Utility rooms</option>
                   <option value="0">0</option>
                   <option value="1">1</option>
                   <option value="2">2</option>

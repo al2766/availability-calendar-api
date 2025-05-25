@@ -366,11 +366,10 @@ const generateTimeSlots = async (date) => {
     return;
   }
   
-  // Show loading state immediately
   setAvailableTimeSlots([{ display: "Loading...", value: "", available: false, isLoading: true }]);
   
   try {
-    // Use cached settings or fetch if needed
+    // Get settings (existing logic)
     let settings = availabilitySettings;
     if (!settings) {
       const settingsDoc = await getDoc(doc(db, "settings", "availability"));
@@ -383,10 +382,9 @@ const generateTimeSlots = async (date) => {
       setAvailabilitySettings(settings);
     }
     
-    // Get the booked time slots for this date
     const bookedTimeSlotData = timeSlotData[date] || {};
     
-    // Get staff info
+    // Get staff info (existing logic)
     let activeStaff = staffCache;
     if (!activeStaff && settings.useStaffAvailability) {
       const staffSnapshot = await getDocs(collection(db, "staff"));
@@ -396,188 +394,192 @@ const generateTimeSlots = async (date) => {
       setStaffCache(activeStaff);
     }
     
-    const totalStaffCount = activeStaff?.length || 0;
+    const totalStaffCount = activeStaff?.length || 2;
     console.log(`Total active staff: ${totalStaffCount}`);
     
-    // Calculate staff assignment by hour
+    // Calculate staff assignment by hour (existing logic)
     const staffAssignedByHour = {};
-    
-    // First, group bookings by ID to properly count staff
     const bookingGroups = {};
     
-    // Process each booked slot to group by booking ID
-   // Process each booked slot to group by booking ID
-for (const [timeSlot, booking] of Object.entries(bookedTimeSlotData)) {
-  const bookingId = booking.bookingId || booking.orderId || 'unknown';
-  const hour = parseInt(timeSlot.split(':')[0]);
-  
-  if (!bookingGroups[bookingId]) {
-    // IMPORTANT: Check if this booking requires 2 staff
-    // Use the explicit flags we added with more thorough checks
-    const requiresTwoStaff = 
-      booking.staffRequired === 2 || 
-      booking.assignTwoCleaners === true ||
-      // FIXED: Make sure to check both original and actual hours
-      (booking.originalHours && settings.assignTwoCleanersAfterHours > 0 && 
-        parseFloat(booking.originalHours) > settings.assignTwoCleanersAfterHours);
+    // Process bookings (existing logic)
+    for (const [timeSlot, booking] of Object.entries(bookedTimeSlotData)) {
+      const bookingId = booking.bookingId || booking.orderId || 'unknown';
+      const hour = parseInt(timeSlot.split(':')[0]);
+      
+      if (!bookingGroups[bookingId]) {
+        const requiresTwoStaff = 
+          booking.staffRequired === 2 || 
+          booking.assignTwoCleaners === true ||
+          (booking.originalHours && settings.assignTwoCleanersAfterHours > 0 && 
+            parseFloat(booking.originalHours) > settings.assignTwoCleanersAfterHours);
+        
+        bookingGroups[bookingId] = {
+          hours: [hour],
+          staffNeeded: requiresTwoStaff ? 2 : 1,
+          booking: booking
+        };
+      } else {
+        bookingGroups[bookingId].hours.push(hour);
+      }
+    }
     
-    // Debug output
-    console.log(`Checking booking ${bookingId}:`, {
-      staffRequired: booking.staffRequired,
-      assignTwoCleaners: booking.assignTwoCleaners,
-      originalHours: booking.originalHours,
-      estimatedHours: booking.estimatedHours,
-      threshold: settings.assignTwoCleanersAfterHours,
-      requiresTwoStaff: requiresTwoStaff
-    });
-    
-    bookingGroups[bookingId] = {
-      hours: [hour],
-      staffNeeded: requiresTwoStaff ? 2 : 1,
-      booking: booking
-    };
-    
-    console.log(`Booking ${bookingId} requires ${requiresTwoStaff ? 2 : 1} staff members`);
-  } else {
-    bookingGroups[bookingId].hours.push(hour);
-  }
-}
-    
-    // Now assign staff for each hour
+    // Calculate staff assigned by hour
     for (let hour = 7; hour <= 20; hour++) {
       staffAssignedByHour[hour] = 0;
-      
-      // Count assigned staff for this hour from each booking
       for (const [bookingId, bookingData] of Object.entries(bookingGroups)) {
         if (bookingData.hours.includes(hour)) {
           staffAssignedByHour[hour] += bookingData.staffNeeded;
         }
       }
-      
-      console.log(`Hour ${hour}:00 has ${staffAssignedByHour[hour]} staff assigned`);
     }
     
-    // Create temporary array for slots
-    const tempSlots = [];
+    // NEW: Calculate remaining staff and find minimum
+    const remainingStaffByHour = {};
+    let minRemainingStaff = totalStaffCount;
     
-    // Get the current date and time
+    for (let hour = 7; hour <= 20; hour++) {
+      remainingStaffByHour[hour] = totalStaffCount - staffAssignedByHour[hour];
+      minRemainingStaff = Math.min(minRemainingStaff, remainingStaffByHour[hour]);
+      console.log(`Hour ${hour}:00 - Assigned: ${staffAssignedByHour[hour]}, Remaining: ${remainingStaffByHour[hour]}`);
+    }
+    
+    console.log(`Minimum remaining staff across all hours: ${minRemainingStaff}`);
+    
+    // NEW: Apply blocking/warning logic based on minimum remaining staff
+    const blockedHours = new Set();
+    const warningHours = new Set();
+    
+    if (minRemainingStaff === 0) {
+      // 0 extra staff logic: Block booking times + buffer + 2 extra hours before
+      console.log("Applying 0 extra staff logic");
+      
+      Object.values(bookingGroups).forEach(bookingData => {
+        const minHour = Math.min(...bookingData.hours);
+        const maxHour = Math.max(...bookingData.hours);
+        
+        // Block booking times
+        bookingData.hours.forEach(hour => blockedHours.add(hour));
+        
+        // Block buffer before and after
+        const bufferHours = settings.bufferTimeBetweenBookings || 0;
+        for (let i = 1; i <= bufferHours; i++) {
+          if (minHour - i >= 7) blockedHours.add(minHour - i);
+          if (maxHour + i <= 20) blockedHours.add(maxHour + i);
+        }
+        
+        // Block extra 2 hours before (for minimum booking possibility)
+        for (let i = bufferHours + 1; i <= bufferHours + 2; i++) {
+          if (minHour - i >= 7) blockedHours.add(minHour - i);
+        }
+        
+        // Add dynamic warnings for hours before blocked section
+        const firstBlockedHour = minHour - bufferHours - 2;
+        for (let hour = 7; hour < firstBlockedHour; hour++) {
+          const maxPossibleHours = firstBlockedHour - hour;
+          if (maxPossibleHours >= 2) {
+            warningHours.add(hour);
+          } else {
+            blockedHours.add(hour); // Less than 2 hours, block it
+          }
+        }
+      });
+      
+    } else if (minRemainingStaff === 1) {
+      // 1 extra staff logic: 4hr warnings for booking times + buffer + assignTwoCleanersAfterHours before
+      console.log("Applying 1 extra staff logic");
+      
+      Object.values(bookingGroups).forEach(bookingData => {
+        const minHour = Math.min(...bookingData.hours);
+        const maxHour = Math.max(...bookingData.hours);
+        
+        // Add warnings for booking times
+        bookingData.hours.forEach(hour => warningHours.add(hour));
+        
+        // Add warnings for buffer before and after
+        const bufferHours = settings.bufferTimeBetweenBookings || 0;
+        for (let i = 1; i <= bufferHours; i++) {
+          if (minHour - i >= 7) warningHours.add(minHour - i);
+          if (maxHour + i <= 20) warningHours.add(maxHour + i);
+        }
+        
+        // Add warnings for assignTwoCleanersAfterHours before
+        const extraHours = settings.assignTwoCleanersAfterHours || 4;
+        for (let i = bufferHours + 1; i <= bufferHours + extraHours; i++) {
+          if (minHour - i >= 7) warningHours.add(minHour - i);
+        }
+      });
+    }
+    // If minRemainingStaff >= 2, no blocks or warnings needed
+    
+    // Time constraints (existing logic)
     const now = new Date();
-    const today = now.toISOString().split('T')[0]; // YYYY-MM-DD format
+    const today = now.toISOString().split('T')[0];
     const currentHour = now.getHours();
     const minimumNoticeHours = settings.minimumNoticeHours || 0;
     
-    // Calculate the earliest available hour based on minimum notice
     let earliestAvailableHour = currentHour;
     if (date === today && minimumNoticeHours > 0) {
       earliestAvailableHour = currentHour + minimumNoticeHours;
-      // Round up to next hour for partial hours
       if (now.getMinutes() > 0) {
         earliestAvailableHour += 1;
       }
     }
     
-    // Process each time slot
+    // Generate time slots
+    const tempSlots = [];
+    
     for (let hour = 7; hour <= 20; hour++) {
       const timeSlot = `${hour}:00`;
-      const isBooked = bookedTimeSlotData[timeSlot] ? true : false;
+      const displayHour = hour > 12 ? hour - 12 : hour;
+      const amPm = hour >= 12 ? 'PM' : 'AM';
       
-      // Check if this slot is in the past or within minimum notice period
+      // Basic time checks
       const isPast = (date === today && hour <= currentHour);
       const isWithinMinNotice = (date === today && hour > currentHour && hour < earliestAvailableHour);
       
-      // Start with basic availability check
-      let isAvailable = !isPast && !isWithinMinNotice;
-      let staffLimited = false;
-      
-     // Replace with this more robust check:
-     if (isBooked) {
-      const assignedStaff = staffAssignedByHour[hour] || 0;
-      const remainingStaff = totalStaffCount - assignedStaff;
-      
-      console.log(`Hour ${hour}:00 - Total staff: ${totalStaffCount}, Assigned: ${assignedStaff}, Remaining: ${remainingStaff}`);
-      
-      // Debug the specific bookings for this hour
-      for (const [bookingId, bookingData] of Object.entries(bookingGroups)) {
-        if (bookingData.hours.includes(hour)) {
-          console.log(`  Booking ${bookingId} using ${bookingData.staffNeeded} staff:`, {
-            originalHours: bookingData.booking.originalHours,
-            estimatedHours: bookingData.booking.estimatedHours,
-            assignTwoCleaners: bookingData.booking.assignTwoCleaners,
-            staffRequired: bookingData.booking.staffRequired
-          });
-        }
+      if (isPast || isWithinMinNotice) {
+        tempSlots.push({
+          display: `${displayHour} ${amPm}`,
+          value: timeSlot,
+          available: false,
+          isPast: true,
+          staffLimited: false
+        });
+        continue;
       }
       
-      // More robust check with fallback
-      if (assignedStaff >= totalStaffCount || remainingStaff <= 0) {
-        console.log(`⛔ NO STAFF AVAILABLE - blocking time slot ${hour}:00`);
+      // Apply our logic
+      let isAvailable = true;
+      let staffLimited = false;
+      let limitedMessage = '';
+      
+      if (blockedHours.has(hour)) {
         isAvailable = false;
-        staffLimited = false;
-      } else if (remainingStaff === 1) {
-        console.log(`⚠️ LIMITED STAFF - marking time slot ${hour}:00 as limited`);
+      } else if (warningHours.has(hour)) {
         isAvailable = true;
         staffLimited = true;
-      } else {
-        console.log(`✅ STAFF AVAILABLE - time slot ${hour}:00 is available`);
-        isAvailable = true;
-        staffLimited = false;
-      }
-    }
-    
-      
-      // Buffer time check
-      if (isAvailable && settings.bufferTimeBetweenBookings > 0) {
-        const bufferHours = settings.bufferTimeBetweenBookings;
         
-        // Check if this hour is within buffer time of any booking
-        for (const [bookingId, bookingData] of Object.entries(bookingGroups)) {
-          const bookingHours = bookingData.hours;
-          if (bookingHours.length > 0) {
-            const minHour = Math.min(...bookingHours);
-            const maxHour = Math.max(...bookingHours);
-            
-            // Check if current hour is within buffer before booking
-            if (hour >= minHour - bufferHours && hour < minHour) {
-              isAvailable = false;
-              break;
-            }
-            
-            // Check if current hour is within buffer after booking
-            if (hour > maxHour && hour <= maxHour + bufferHours) {
-              isAvailable = false;
-              break;
-            }
-          }
+        if (minRemainingStaff === 0) {
+          // Calculate dynamic hours for 0 staff scenario
+          const availableHours = Math.min(8, hour - 7 + 1); // Simplified calculation
+          limitedMessage = `Only bookings of ${Math.max(2, availableHours)} hours or less available at this time`;
+        } else if (minRemainingStaff === 1) {
+          limitedMessage = 'Only 4 hour bookings or less available due to limited availability';
         }
       }
-      
-      // Staff availability check from settings
-      if (isAvailable && settings.useStaffAvailability) {
-        // Check if remaining staff is sufficient for a new booking
-        const assignedStaff = staffAssignedByHour[hour] || 0;
-        const remainingStaff = totalStaffCount - assignedStaff;
-        
-        // Need at least 1 staff for a new booking
-        isAvailable = remainingStaff > 0;
-        
-        // Mark as limited staff if only 1 remains (potential limit on booking hours)
-        staffLimited = (remainingStaff === 1);
-      }
-      
-      const displayHour = hour > 12 ? hour - 12 : hour;
-      const amPm = hour >= 12 ? 'PM' : 'AM';
       
       tempSlots.push({
         display: `${displayHour} ${amPm}`,
         value: timeSlot,
         available: isAvailable,
-        isPast: isPast || isWithinMinNotice,
-        staffLimited: staffLimited
+        isPast: false,
+        staffLimited: staffLimited,
+        limitedMessage: limitedMessage
       });
     }
     
-    // Update state with processed slots
     setAvailableTimeSlots(tempSlots);
+    
   } catch (error) {
     console.error("Error generating time slots:", error);
     setAvailableTimeSlots([{ display: "Error loading slots", value: "", available: false, isError: true }]);

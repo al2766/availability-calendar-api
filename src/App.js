@@ -20,7 +20,7 @@ function App() {
   const [timeSlotData, setTimeSlotData] = useState({});
   
   // Navigation states
-  const [activeTab, setActiveTab] = useState("admin");
+  const [activeTab, setActiveTab] = useState("bookings");
   const [currentMonth, setCurrentMonth] = useState(new Date().getMonth());
   const [currentYear, setCurrentYear] = useState(new Date().getFullYear());
   
@@ -669,103 +669,161 @@ function App() {
   };
 
   // Cancel booking
-  const cancelBooking = async (bookingId, cancellationReason = "") => {
-    console.log("cancelBooking called with bookingId:", bookingId);
+// Replace the existing cancelBooking function in App.js with this updated version
+
+const cancelBooking = async (bookingId, cancellationReason = "") => {
+  console.log("cancelBooking called with bookingId:", bookingId);
+  
+  try {
+    const bookingToCancel = bookings.find(b => b.id === bookingId);
+    if (!bookingToCancel) {
+      console.error("Booking not found");
+      return;
+    }
     
-    try {
-      const bookingToCancel = bookings.find(b => b.id === bookingId);
-      if (!bookingToCancel) {
-        console.error("Booking not found");
-        return;
+    console.log("Cancelling booking:", bookingToCancel);
+    
+    // Send cancellation notification to Zapier first
+    await notifyCancellation(bookingToCancel, cancellationReason);
+    
+    const dateRef = doc(db, "unavailability", bookingToCancel.date);
+    const dateDoc = await getDoc(dateRef);
+    
+    if (!dateDoc.exists()) {
+      console.error("Date document not found");
+      return;
+    }
+    
+    const dateData = dateDoc.data();
+    let updatedDocData = {...dateData};
+    
+    console.log("Original document data:", dateData);
+    
+    // NEW LOGIC: Handle the compound key structure
+    if (updatedDocData.bookedTimeSlots) {
+      const updatedSlots = {...updatedDocData.bookedTimeSlots};
+      
+      // Find all time slot keys that belong to this booking
+      const keysToDelete = [];
+      Object.keys(updatedSlots).forEach(key => {
+        const slot = updatedSlots[key];
+        // Check if this slot belongs to the booking we want to cancel
+        if (slot.bookingId === bookingId || slot.orderId === bookingId) {
+          keysToDelete.push(key);
+        }
+      });
+      
+      console.log("Keys to delete:", keysToDelete);
+      
+      // Remove all time slots for this booking
+      keysToDelete.forEach(key => {
+        delete updatedSlots[key];
+      });
+      
+      updatedDocData.bookedTimeSlots = updatedSlots;
+      
+      // Check if there are any remaining bookings
+      const remainingBookings = Object.keys(updatedSlots).length;
+      console.log("Remaining bookings after cancellation:", remainingBookings);
+      
+      if (remainingBookings === 0) {
+        // No bookings left, remove fullyBooked flag and clean up
+        delete updatedDocData.fullyBooked;
+        
+        // If no other data exists, we can delete the entire document
+        if (Object.keys(updatedDocData).length === 1 && updatedDocData.bookedTimeSlots) {
+          // Only bookedTimeSlots exists and it's empty, delete the document
+          await deleteDoc(dateRef);
+          console.log("Deleted entire date document as no bookings remain");
+        } else {
+          // Update with empty bookedTimeSlots
+          await setDoc(dateRef, updatedDocData);
+          console.log("Updated document with empty booking slots");
+        }
+      } else {
+        // Check if remaining bookings still make the date fully booked
+        const hasEnoughConsecutiveHours = checkConsecutiveAvailableHours(updatedSlots);
+        updatedDocData.fullyBooked = !hasEnoughConsecutiveHours;
+        
+        await setDoc(dateRef, updatedDocData);
+        console.log("Updated document with remaining bookings");
       }
+    } else {
+      // FALLBACK: Handle legacy data structure (direct time properties)
+      console.log("Handling legacy data structure");
       
-      console.log("Cancelling booking:", bookingToCancel);
-      
-      await notifyCancellation(bookingToCancel, cancellationReason);
-      
-      const dateRef = doc(db, "unavailability", bookingToCancel.date);
-      
-      const dateDoc = await getDoc(dateRef);
-      if (!dateDoc.exists()) {
-        console.error("Date document not found");
-        return;
-      }
-      
-      const dateData = dateDoc.data();
-      let updatedDocData = {...dateData};
+      // Look for direct time properties like "7:00", "8:00", etc.
+      const timeKeysToDelete = [];
       
       if (bookingToCancel.timeSlots && bookingToCancel.timeSlots.length > 0) {
-        console.log("Cancelling grouped booking with timeSlots:", bookingToCancel.timeSlots);
-        
-        if (updatedDocData.bookedTimeSlots) {
-          const updatedSlots = {...updatedDocData.bookedTimeSlots};
-          
-          bookingToCancel.timeSlots.forEach(hour => {
-            const timeKey = `${hour}:00`;
-            console.log(`Removing time slot: ${timeKey}`);
-            delete updatedSlots[timeKey];
-          });
-          
-          updatedDocData.bookedTimeSlots = updatedSlots;
-        } else {
-          bookingToCancel.timeSlots.forEach(hour => {
-            const timeKey = `${hour}:00`;
-            console.log(`Removing direct time slot: ${timeKey}`);
-            updatedDocData[timeKey] = deleteField();
-          });
-        }
-      } else if (bookingToCancel.time) {
-        console.log(`Cancelling single booking for time: ${bookingToCancel.time}`);
-        
-        if (updatedDocData.bookedTimeSlots && updatedDocData.bookedTimeSlots[bookingToCancel.time]) {
-          const updatedSlots = {...updatedDocData.bookedTimeSlots};
-          delete updatedSlots[bookingToCancel.time];
-          updatedDocData.bookedTimeSlots = updatedSlots;
-        } else {
-          updatedDocData[bookingToCancel.time] = deleteField();
+        // Grouped booking with timeSlots array
+        bookingToCancel.timeSlots.forEach(hour => {
+          const timeKey = `${hour}:00`;
+          if (updatedDocData[timeKey]) {
+            timeKeysToDelete.push(timeKey);
+          }
+        });
+      } else if (bookingToCancel.time || bookingToCancel.startTime) {
+        // Single booking with time property
+        const timeKey = bookingToCancel.time || bookingToCancel.startTime;
+        if (updatedDocData[timeKey]) {
+          timeKeysToDelete.push(timeKey);
         }
       }
       
-      const hasTimeSlots = 
-        (updatedDocData.bookedTimeSlots && Object.keys(updatedDocData.bookedTimeSlots).length > 0) ||
-        Object.keys(updatedDocData).some(key => key.includes(':00') && updatedDocData[key]);
-        
-      if (!hasTimeSlots) {
-        updatedDocData.fullyBooked = false;
-      }
+      console.log("Legacy time keys to delete:", timeKeysToDelete);
       
-      console.log("Updated document data:", updatedDocData);
+      // Remove the legacy time properties
+      timeKeysToDelete.forEach(timeKey => {
+        delete updatedDocData[timeKey];
+      });
+      
+      // Check if any time-related properties remain
+      const remainingTimeProps = Object.keys(updatedDocData).filter(key => 
+        key.includes(':00') || key === 'fullyBooked'
+      );
+      
+      if (remainingTimeProps.length <= 1) { // Only fullyBooked might remain
+        delete updatedDocData.fullyBooked;
+      }
       
       await setDoc(dateRef, updatedDocData);
-      
-      await fetchBookings();
-      
-      if (selectedBooking && selectedBooking.id === bookingId) {
-        closeBookingDetails();
-      }
-      
-      const successMessage = document.createElement('div');
-      successMessage.innerHTML = '<div class="fixed top-0 right-0 m-4 p-4 bg-green-500 text-white rounded shadow-lg transition-opacity duration-500">Booking cancelled successfully!</div>';
-      document.body.appendChild(successMessage);
-      
-      setTimeout(() => {
-        successMessage.querySelector('div').style.opacity = '0';
-        setTimeout(() => document.body.removeChild(successMessage), 500);
-      }, 3000);
-      
-    } catch (error) {
-      console.error("Error cancelling booking:", error);
-      
-      const errorMessage = document.createElement('div');
-      errorMessage.innerHTML = `<div class="fixed top-0 right-0 m-4 p-4 bg-red-500 text-white rounded shadow-lg transition-opacity duration-500">Error: ${error.message}</div>`;
-      document.body.appendChild(errorMessage);
-      
-      setTimeout(() => {
-        errorMessage.querySelector('div').style.opacity = '0';
-        setTimeout(() => document.body.removeChild(errorMessage), 500);
-      }, 5000);
     }
-  };
+    
+    // Refresh the unavailability data
+    await fetchUnavailability();
+    
+    // Refresh bookings list
+    await fetchBookings();
+    
+    // Close booking details if it's the cancelled booking
+    if (selectedBooking && selectedBooking.id === bookingId) {
+      closeBookingDetails();
+    }
+    
+    // Show success message
+    const successMessage = document.createElement('div');
+    successMessage.innerHTML = '<div class="fixed top-0 right-0 m-4 p-4 bg-green-500 text-white rounded shadow-lg transition-opacity duration-500">Booking cancelled successfully!</div>';
+    document.body.appendChild(successMessage);
+    
+    setTimeout(() => {
+      successMessage.querySelector('div').style.opacity = '0';
+      setTimeout(() => document.body.removeChild(successMessage), 500);
+    }, 3000);
+    
+  } catch (error) {
+    console.error("Error cancelling booking:", error);
+    
+    const errorMessage = document.createElement('div');
+    errorMessage.innerHTML = `<div class="fixed top-0 right-0 m-4 p-4 bg-red-500 text-white rounded shadow-lg transition-opacity duration-500">Error: ${error.message}</div>`;
+    document.body.appendChild(errorMessage);
+    
+    setTimeout(() => {
+      errorMessage.querySelector('div').style.opacity = '0';
+      setTimeout(() => document.body.removeChild(errorMessage), 500);
+    }, 5000);
+  }
+};
 
 // Update fetchUnavailability function
 const fetchUnavailability = async () => {
@@ -1166,49 +1224,47 @@ const fetchUnavailability = async () => {
   return (
     <div className="min-h-screen bg-gray-100 p-6">
       {/* Tab Buttons */}
-      <div className="max-w-6xl mx-auto mb-6 flex gap-4">
-        <button 
-          onClick={() => setActiveTab("admin")}
-          className={`px-6 py-2 rounded ${activeTab === "admin" ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-700"}`}
-        >
-          Admin
-        </button>
-        <button 
-          onClick={() => setActiveTab("bookings")}
-          className={`px-6 py-2 rounded ${activeTab === "bookings" ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-700"}`}
-        >
-          Bookings
-        </button>
-        <button 
-          onClick={() => setActiveTab("staff")}
-          className={`px-6 py-2 rounded ${activeTab === "staff" ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-700"}`}
-        >
-          Staff
-        </button>
-        <button 
-          onClick={() => setActiveTab("availability")}
-          className={`px-6 py-2 rounded ${activeTab === "availability" ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-700"}`}
-        >
-          Availability
-        </button>
-        <button 
-          onClick={() => window.location.href = '/booking/home'}
-          className="px-6 py-2 rounded bg-gray-200 text-gray-700"
-        >
-          Home Cleaning Form
-        </button>
-        <button 
-          onClick={() => window.location.href = '/booking/office'}
-          className="px-6 py-2 rounded bg-gray-200 text-gray-700"
-        >
-          Office Cleaning Form
-        </button>
-      </div>
+      <div className="max-w-6xl mx-auto mb-6">
+  <div className="tab-buttons-container flex gap-4 lg:flex-row">
+    <button 
+      onClick={() => setActiveTab("bookings")}
+      className={`px-6 py-2 rounded ${activeTab === "bookings" ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-700"}`}
+    >
+      Bookings
+    </button>
+    <button 
+      onClick={() => setActiveTab("staff")}
+      className={`px-6 py-2 rounded ${activeTab === "staff" ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-700"}`}
+    >
+      Staff
+    </button>
+    <button 
+      onClick={() => setActiveTab("availability")}
+      className={`px-6 py-2 rounded ${activeTab === "availability" ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-700"}`}
+    >
+      Availability
+    </button>
+    <button 
+      onClick={() => window.location.href = '/booking/home'}
+      className="px-6 py-2 rounded bg-gray-200 text-gray-700"
+    >
+      Home Clean
+    </button>
+    <button 
+      onClick={() => window.location.href = '/booking/office'}
+      className="px-6 py-2 rounded bg-gray-200 text-gray-700"
+    >
+      Office Clean
+    </button>
+  </div>
+</div>
+
+<hr className="my-6 border-gray-300" />
       
       {activeTab === "bookings" ? (
         // Bookings Management View
         <div className="container max-w-6xl mx-auto">
-          <h1 className="text-3xl font-bold text-gray-800 mb-6">Bookings Management</h1>
+          <h1 className="text-2xl font-bold text-gray-800 mb-6">Bookings Management</h1>
           
           {/* Filters and Search */}
           <div className="flex flex-wrap items-center justify-between bg-white p-4 rounded-lg shadow-md mb-6">
@@ -1479,13 +1535,13 @@ const fetchUnavailability = async () => {
                   )}
                   
                   <div className="mt-8 flex justify-end">
-                    <button 
-                      onClick={() => showCancelBookingConfirm(selectedBooking.id)}
-                      className="bg-red-600 text-white px-6 py-2 rounded hover:bg-red-700 transition duration-200"
-                    >
-                      Cancel Booking
-                    </button>
-                  </div>
+          <button 
+            onClick={closeBookingDetails}
+            className="bg-gray-600 text-white px-6 py-2 rounded hover:bg-gray-700 transition duration-200"
+          >
+            Close
+          </button>
+        </div>
                 </div>
               </div>
             </div>
@@ -1607,16 +1663,10 @@ const fetchUnavailability = async () => {
             />
           </div>
         </div>
-      ) : activeTab === "admin" ? (
-        // Admin Dashboard (simplified)
-        <div className="max-w-6xl mx-auto">
-          <h1 className="text-3xl font-bold text-gray-800 mb-6">Admin Dashboard</h1>
-          <p className="text-gray-600">Calendar management has been moved to the Availability tab.</p>
-        </div>
       ) : activeTab === "staff" ? (
         // Staff Management View
         <div className="container max-w-6xl mx-auto">
-          <h1 className="text-3xl font-bold text-gray-800 mb-6">Staff Management</h1>
+          <h1 className="text-2xl font-bold text-gray-800 mb-6">Staff Management</h1>
           
           <div className="mb-6">
             <button
@@ -1850,7 +1900,7 @@ const fetchUnavailability = async () => {
       ) : activeTab === "availability" ? (
         // Availability Management View
         <div className="container max-w-6xl mx-auto">
-          <h1 className="text-3xl font-bold text-gray-800 mb-6">Availability Settings</h1>
+          <h1 className="text-2xl font-bold text-gray-800 mb-6">Availability Settings</h1>
           
           {/* Settings Section */}
           <div className="bg-white rounded-lg shadow-md p-6 mb-6">
@@ -1984,7 +2034,7 @@ const fetchUnavailability = async () => {
           </div>
           
           {/* Quick Actions */}
-          <div className="bg-white rounded-lg shadow-md p-6 mb-6">
+          {/* <div className="bg-white rounded-lg shadow-md p-6 mb-6">
             <h3 className="text-lg font-semibold mb-4">Quick Actions</h3>
             <div className="flex gap-4">
               <button
@@ -2021,7 +2071,7 @@ const fetchUnavailability = async () => {
                 Smart Mode (Staff-Based)
               </button>
             </div>
-          </div>
+          </div> */}
           
           {/* Manual Date Management Section */}
           <div className="bg-white rounded-lg shadow-md p-6">

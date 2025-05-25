@@ -197,7 +197,7 @@ const AddressLookup = ({ onAddressSelect }) => {
           />
         </div>
         <button
-          className="fs-button bg-blue-600 text-white font-medium py-2 px-4 rounded-lg hover:bg-blue-700 transition duration-200"
+          className="fs-button text-white font-medium py-2 px-4 rounded-lg hover:bg-blue-700 transition duration-200"
           onClick={handleSearch}
           disabled={loading}
         >
@@ -319,31 +319,47 @@ const AddressLookup = ({ onAddressSelect }) => {
       )}
       
       {/* Selected Address Display - Only show when an address is selected */}
-      {selectedAddress && !showAddressForm && (
-        <div className="selected-address bg-gray-50 p-3 rounded-lg mb-3">
-          <div className="mb-1 font-medium">Selected Address:</div>
-          <div>{selectedAddress.line1}</div>
-          {selectedAddress.line2 && <div>{selectedAddress.line2}</div>}
-          <div>{selectedAddress.town}</div>
-          {selectedAddress.county && <div>{selectedAddress.county}</div>}
-          <div>{selectedAddress.postcode}</div>
-          <button
-            className="text-blue-600 underline mt-2"
-            onClick={() => {
-              setSelectedAddress(null);
-              setShowAddressForm(false);
-            }}
-          >
-            Change
-          </button>
-        </div>
-      )}
+{selectedAddress && !showAddressForm && (
+  <div className="selected-address bg-gray-50 p-3 rounded-lg mb-3">
+    <div className="mb-1 font-medium">Selected Address:</div>
+    <div>{selectedAddress.line1}</div>
+    {selectedAddress.line2 && <div>{selectedAddress.line2}</div>}
+    <div>{selectedAddress.town}</div>
+    {selectedAddress.county && <div>{selectedAddress.county}</div>}
+    <div>{selectedAddress.postcode}</div>
+    <button
+      className="text-white bg-[#0071bc] hover:bg-[#005a94] transition duration-200 mt-2 py-2 px-4 rounded-lg"
+      onClick={() => {
+        // Reset everything to initial state
+        setSelectedAddress(null);
+        setShowAddressForm(false);
+        setAddresses([]);
+        setPostcode("");
+        setError("");
+        setCustomAddress({
+          line1: "",
+          line2: "",
+          town: "",
+          county: "",
+          postcode: ""
+        });
+        
+        // Notify parent component that address was cleared
+        if (onAddressSelect) {
+          onAddressSelect(null);
+        }
+      }}
+    >
+      Change
+    </button>
+  </div>
+)}
       
       {/* Manual entry link when no addresses are shown and no search has been performed */}
       {!showAddressForm && addresses.length === 0 && !loading && !error && (
-        <div className="text-center my-3">
+        <div className="my-3">
           <button
-            className="bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 transition duration-200"
+            className="bg-gray-400 text-white py-2 px-4 rounded-lg hover:bg-gray-500 transition duration-200"
             onClick={() => {
               setShowAddressForm(true);
               setError("");
