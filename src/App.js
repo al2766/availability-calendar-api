@@ -1689,7 +1689,7 @@ const fetchUnavailability = async () => {
               </div>
             ) : (
               <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-200">
+                <table className="min-w-full divide-y divide-gray-200 staff-table">
                   <thead className="bg-gray-50">
                     <tr>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
@@ -1699,7 +1699,7 @@ const fetchUnavailability = async () => {
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                     </tr>
                   </thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
+                  <tbody className=" divide-y divide-gray-200">
                     {staff.map((staffMember) => (
                       <tr key={staffMember.id}>
                         <td className="px-6 py-4 whitespace-nowrap">
@@ -1728,18 +1728,20 @@ const fetchUnavailability = async () => {
                           </div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                          <div>
                           <button 
                             onClick={() => editStaff(staffMember)}
-                            className="text-blue-600 hover:text-blue-900 mr-4"
+                            className="text-white mr-4"
                           >
                             Edit
                           </button>
                           <button 
                             onClick={() => deleteStaff(staffMember.id)}
-                            className="text-red-600 hover:text-red-900"
+                            className="deleteBtn text-white hover:text-red-900"
                           >
                             Delete
                           </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -1776,7 +1778,7 @@ const fetchUnavailability = async () => {
                           active: true
                         });
                       }}
-                      className="text-gray-500 hover:text-gray-700"
+                      className="text-white"
                     >
                       <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
