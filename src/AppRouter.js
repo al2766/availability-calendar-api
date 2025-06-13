@@ -6,6 +6,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 const App = lazy(() => import('./App'));
 const HomeCleaningForm = lazy(() => import('./forms/HomeCleaningForm'));
 const OfficeCleaningForm = lazy(() => import('./forms/OfficeCleaningForm'));
+const CustomFormRenderer = lazy(() => import('./components/FormBuilder/CustomFormRenderer'));
 
 // Loading component for suspense fallback
 const Loading = () => (
@@ -24,6 +25,7 @@ function AppRouter() {
           <Route path="/admin" element={<App />} />
           <Route path="/booking/home" element={<HomeCleaningForm />} />
           <Route path="/booking/office" element={<OfficeCleaningForm />} />
+          <Route path="/booking/custom/:formId" element={<CustomFormRenderer />} />
           {/* Legacy route - redirect to home cleaning for backward compatibility */}
           <Route path="/booking" element={<Navigate to="/booking/home" replace />} />
         </Routes>

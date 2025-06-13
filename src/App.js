@@ -7,6 +7,9 @@ import "./App.css";
 import GenerateChecklistButton, { generateChecklistPDFBase64 } from './components/CleaningChecklist';
 import ConfirmModal from './components/ConfirmModal';
 import QuoteModal from './components/QuoteModal';
+import FormBuilder from './components/FormBuilder/FormBuilder';
+import CustomFormRenderer from './components/FormBuilder/CustomFormRenderer';
+import { createTemplateFormsInFirebase } from './utils/formMigration';
 
 function App() {
 
@@ -27,6 +30,13 @@ const [sendingChecklist, setSendingChecklist] = useState(false);
   
   // Navigation states
   const [activeTab, setActiveTab] = useState("bookings");
+  
+  // Form management states
+  const [customForms, setCustomForms] = useState([]);
+  const [formsLoading, setFormsLoading] = useState(false);
+  const [showFormBuilder, setShowFormBuilder] = useState(false);
+  const [editingForm, setEditingForm] = useState(null);
+  const [previewingForm, setPreviewingForm] = useState(null);
   const [currentMonth, setCurrentMonth] = useState(new Date().getMonth());
   const [currentYear, setCurrentYear] = useState(new Date().getFullYear());
   
@@ -120,6 +130,12 @@ const [sendingChecklist, setSendingChecklist] = useState(false);
   useEffect(() => {
     if (activeTab === "availability") {
       fetchAvailabilitySettings();
+    }
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab === "forms") {
+      fetchCustomForms();
     }
   }, [activeTab]);
 
@@ -1296,11 +1312,92 @@ const fetchUnavailability = async () => {
     }));
   };
 
+  // Form management functions
+  const fetchCustomForms = async () => {
+    try {
+      setFormsLoading(true);
+      const snapshot = await getDocs(collection(db, "customForms"));
+      const forms = snapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      setCustomForms(forms.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)));
+    } catch (error) {
+      console.error("Error fetching custom forms:", error);
+      setCustomForms([]);
+    } finally {
+      setFormsLoading(false);
+    }
+  };
+
+  const handleCreateForm = () => {
+    setEditingForm(null);
+    setShowFormBuilder(true);
+  };
+
+  const handleEditForm = (form) => {
+    setEditingForm(form);
+    setShowFormBuilder(true);
+  };
+
+  const handleDeleteForm = async (formId) => {
+    if (window.confirm('Are you sure you want to delete this form? This action cannot be undone.')) {
+      try {
+        await deleteDoc(doc(db, "customForms", formId));
+        await fetchCustomForms();
+        alert('Form deleted successfully!');
+      } catch (error) {
+        console.error('Error deleting form:', error);
+        alert('Error deleting form. Please try again.');
+      }
+    }
+  };
+
+  const handleFormSaved = (savedForm) => {
+    setShowFormBuilder(false);
+    setEditingForm(null);
+    fetchCustomForms();
+  };
+
+  const handleCancelFormBuilder = () => {
+    setShowFormBuilder(false);
+    setEditingForm(null);
+  };
+
+  const handlePreviewForm = (form) => {
+    setPreviewingForm(form);
+  };
+
+  const handleClosePreview = () => {
+    setPreviewingForm(null);
+  };
+
+  const navigateToCustomForm = (formId) => {
+    window.location.href = `/booking/custom/${formId}`;
+  };
+
+  const handleCreateTemplates = async () => {
+    if (window.confirm('This will create template forms based on your existing Home and Office cleaning forms. Continue?')) {
+      try {
+        const result = await createTemplateFormsInFirebase();
+        if (result.success) {
+          alert(result.message);
+          fetchCustomForms(); // Refresh the forms list
+        } else {
+          alert(result.message);
+        }
+      } catch (error) {
+        console.error('Error creating templates:', error);
+        alert('Failed to create template forms.');
+      }
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-100 p-6">
       {/* Tab Buttons */}
       <div className="max-w-6xl mx-auto mb-6">
-  <div className="tab-buttons-container flex gap-4 lg:flex-row">
+  <div className="tab-buttons-container flex gap-4 lg:flex-row flex-wrap">
     <button 
       onClick={() => setActiveTab("bookings")}
       className={`px-6 py-2 rounded ${activeTab === "bookings" ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-700"}`}
@@ -1320,16 +1417,27 @@ const fetchUnavailability = async () => {
       Availability
     </button>
     <button 
-      onClick={() => window.location.href = '/booking/home'}
-      className="px-6 py-2 rounded bg-gray-200 text-gray-700"
+      onClick={() => setActiveTab("forms")}
+      className={`px-6 py-2 rounded ${activeTab === "forms" ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-700"}`}
     >
-      Home Clean
+      Forms
+    </button>
+    
+    {/* Divider */}
+    <div className="border-l border-gray-300 mx-2"></div>
+    
+    {/* Legacy Form Links */}
+    <button 
+      onClick={() => window.location.href = '/booking/home'}
+      className="px-6 py-2 rounded bg-gray-200 text-gray-700 hover:bg-gray-300"
+    >
+      🏠 Home Clean
     </button>
     <button 
       onClick={() => window.location.href = '/booking/office'}
-      className="px-6 py-2 rounded bg-gray-200 text-gray-700"
+      className="px-6 py-2 rounded bg-gray-200 text-gray-700 hover:bg-gray-300"
     >
-      Office Clean
+      🏢 Office Clean
     </button>
   </div>
 </div>
@@ -2239,7 +2347,212 @@ const fetchUnavailability = async () => {
             </div>
           </div>
         </div>
+      ) : activeTab === "forms" ? (
+        // Forms Management View
+        <div className="container max-w-6xl mx-auto">
+          <div className="flex justify-between items-center mb-6">
+            <h1 className="text-2xl font-bold text-gray-800">Custom Forms</h1>
+            <button
+              onClick={handleCreateForm}
+              className="bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700 transition duration-200"
+            >
+              + Create New Form
+            </button>
+          </div>
+          
+          {/* Forms Grid */}
+          <div className="bg-white rounded-lg shadow-md overflow-hidden">
+            {formsLoading ? (
+              <div className="p-8 text-center">
+                <div className="spinner inline-block mr-2"></div>
+                <span>Loading forms...</span>
+              </div>
+            ) : customForms.length === 0 ? (
+              <div className="p-8 text-center text-gray-500">
+                <div className="mb-4">
+                  <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                </div>
+                <h3 className="text-lg font-medium text-gray-900 mb-2">No custom forms yet</h3>
+                <p className="text-gray-500 mb-4">Create your first custom booking form to get started.</p>
+                <button
+                  onClick={handleCreateForm}
+                  className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 transition duration-200"
+                >
+                  Create Your First Form
+                </button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 p-6">
+                {customForms.map((form) => (
+                  <div key={form.id} className="border rounded-lg p-4 hover:shadow-md transition-shadow">
+                    <div className="flex justify-between items-start mb-3">
+                      <div>
+                        <h3 className="font-semibold text-lg text-gray-900">{form.name}</h3>
+                        <p className="text-gray-600 text-sm mt-1">
+                          {form.description || 'No description'}
+                        </p>
+                      </div>
+                      <div className="flex space-x-1">
+                        <button
+                          onClick={() => handlePreviewForm(form)}
+                          className="text-blue-600 hover:text-blue-800 text-sm"
+                          title="Preview"
+                        >
+                          👁️
+                        </button>
+                        <button
+                          onClick={() => handleEditForm(form)}
+                          className="text-green-600 hover:text-green-800 text-sm"
+                          title="Edit"
+                        >
+                          ✏️
+                        </button>
+                      </div>
+                    </div>
+                    
+                    <div className="text-sm text-gray-500 mb-3">
+                      <p>Fields: {form.fields?.length || 0}</p>
+                      <p>Created: {new Date(form.createdAt).toLocaleDateString()}</p>
+                      <p>Updated: {new Date(form.updatedAt).toLocaleDateString()}</p>
+                    </div>
+                    
+                    <div className="flex space-x-2">
+                      <button
+                        onClick={() => navigateToCustomForm(form.id)}
+                        className="flex-1 bg-blue-600 text-white px-3 py-2 rounded text-sm hover:bg-blue-700 transition duration-200"
+                      >
+                        View Form
+                      </button>
+                      <button
+                        onClick={() => {
+                          navigator.clipboard.writeText(`${window.location.origin}/booking/custom/${form.id}`);
+                          alert('Form URL copied to clipboard!');
+                        }}
+                        className="bg-gray-200 text-gray-700 px-3 py-2 rounded text-sm hover:bg-gray-300 transition duration-200"
+                        title="Copy URL"
+                      >
+                        🔗
+                      </button>
+                      <button
+                        onClick={() => handleDeleteForm(form.id)}
+                        className="bg-red-100 text-red-600 px-3 py-2 rounded text-sm hover:bg-red-200 transition duration-200"
+                        title="Delete"
+                      >
+                        🗑️
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          
+          {/* Quick Actions */}
+          <div className="mt-6 bg-white rounded-lg shadow-md p-6">
+            <h3 className="font-semibold mb-3">Quick Actions</h3>
+            <div className="flex flex-wrap gap-3">
+              <button
+                onClick={() => window.location.href = '/booking/home'}
+                className="px-4 py-2 bg-green-100 text-green-700 rounded hover:bg-green-200 transition duration-200"
+              >
+                🏠 View Home Cleaning Form
+              </button>
+              <button
+                onClick={() => window.location.href = '/booking/office'}
+                className="px-4 py-2 bg-purple-100 text-purple-700 rounded hover:bg-purple-200 transition duration-200"
+              >
+                🏢 View Office Cleaning Form
+              </button>
+              <button
+                onClick={handleCreateTemplates}
+                className="px-4 py-2 bg-yellow-100 text-yellow-700 rounded hover:bg-yellow-200 transition duration-200"
+              >
+                📋 Create Template Forms
+              </button>
+              <button
+                onClick={() => {
+                  if (customForms.length === 0) {
+                    alert('Create a custom form first!');
+                    return;
+                  }
+                  const urls = customForms.map(form => `${window.location.origin}/booking/custom/${form.id}`).join('\n');
+                  navigator.clipboard.writeText(urls);
+                  alert('All form URLs copied to clipboard!');
+                }}
+                className="px-4 py-2 bg-blue-100 text-blue-700 rounded hover:bg-blue-200 transition duration-200"
+              >
+                📋 Copy All Form URLs
+              </button>
+            </div>
+          </div>
+        </div>
       ) : null }
+
+{/* Form Builder Modal */}
+{showFormBuilder && (
+  <div className="fixed inset-0 bg-black bg-opacity-50 z-50">
+    <FormBuilder
+      onSave={handleFormSaved}
+      onCancel={handleCancelFormBuilder}
+      existingForm={editingForm}
+      isEditMode={!!editingForm}
+    />
+  </div>
+)}
+
+{/* Form Preview Modal */}
+{previewingForm && (
+  <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+    <div className="bg-white rounded-lg shadow-lg w-full max-w-4xl max-h-[90vh] overflow-auto">
+      <div className="p-6">
+        <div className="flex justify-between items-center mb-4">
+          <h2 className="text-2xl font-bold">Preview: {previewingForm.name}</h2>
+          <button 
+            onClick={handleClosePreview}
+            className="text-gray-500 hover:text-gray-700"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        
+        <div className="border rounded-lg p-4 bg-gray-50">
+          <div className="text-center text-gray-600 py-8">
+            <p>Form preview will be available when viewing the actual form.</p>
+            <p className="text-sm mt-2">Click "Open Form" to see the live preview.</p>
+          </div>
+        </div>
+        
+        <div className="mt-4 flex justify-end space-x-3">
+          <button
+            onClick={() => {
+              navigator.clipboard.writeText(`${window.location.origin}/booking/custom/${previewingForm.id}`);
+              alert('Form URL copied to clipboard!');
+            }}
+            className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition duration-200"
+          >
+            Copy Form URL
+          </button>
+          <button
+            onClick={() => navigateToCustomForm(previewingForm.id)}
+            className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 transition duration-200"
+          >
+            Open Form
+          </button>
+          <button 
+            onClick={handleClosePreview}
+            className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700 transition duration-200"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+)}
 
 {/* Send Checklist Modal */}
 {showChecklistModal && selectedBookingForChecklist && (
