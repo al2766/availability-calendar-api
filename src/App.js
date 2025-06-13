@@ -4,11 +4,17 @@ import "react-calendar/dist/Calendar.css";
 import { collection, getDocs, setDoc, deleteDoc, doc, deleteField, getDoc } from "firebase/firestore";
 import { db } from "./firebase";
 import "./App.css";
-import GenerateChecklistButton from './components/CleaningChecklist';
+import GenerateChecklistButton, { generateChecklistPDFBase64 } from './components/CleaningChecklist';
 import ConfirmModal from './components/ConfirmModal';
 import QuoteModal from './components/QuoteModal';
 
 function App() {
+
+  // Add these state variables to your App.js (after existing useState declarations)
+const [showChecklistModal, setShowChecklistModal] = useState(false);
+const [selectedBookingForChecklist, setSelectedBookingForChecklist] = useState(null);
+const [selectedStaffForChecklist, setSelectedStaffForChecklist] = useState("");
+const [sendingChecklist, setSendingChecklist] = useState(false);
   // Admin state variables for time slot management
   const [adminSelectedDate, setAdminSelectedDate] = useState(null);
   const [adminTimeSlots, setAdminTimeSlots] = useState({});
@@ -175,6 +181,75 @@ function App() {
     }
     return slots;
   };
+
+const openChecklistModal = (booking) => {
+  console.log("Opening checklist modal, current staff count:", staff.length);
+  console.log("Staff data:", staff);
+  
+  setSelectedBookingForChecklist(booking);
+  setShowChecklistModal(true);
+  
+  // Always refresh staff data to ensure it's current
+  fetchStaff();
+};
+
+// Add this function to send checklist via Zapier
+const sendChecklistToStaff = async () => {
+  if (!selectedStaffForChecklist) {
+    alert("Please select a staff member");
+    return;
+  }
+  
+  setSendingChecklist(true);
+  
+  try {
+    // Find selected staff details
+    const staffMember = staff.find(s => s.id === selectedStaffForChecklist);
+    
+    // Generate PDF as base64 using your existing function
+    const pdfBase64 = await generateChecklistPDFBase64(selectedBookingForChecklist);
+    console.log(selectedBookingForChecklist.id);
+    console.log(staffMember.email);
+    // Send to Zapier
+    const zapierData = {
+      type: "checklist",
+      orderId: selectedBookingForChecklist.id,
+      staffName: staffMember.name,
+      staffPhone: staffMember.phone,
+      staffEmail: staffMember.email,
+      customerName: selectedBookingForChecklist.name || selectedBookingForChecklist.customerName,
+      customerAddress: selectedBookingForChecklist.address,
+      service: selectedBookingForChecklist.service,
+      date: selectedBookingForChecklist.date || selectedBookingForChecklist.displayDate,
+      time: selectedBookingForChecklist.time || selectedBookingForChecklist.displayTimeRange,
+      duration: selectedBookingForChecklist.duration,
+      bookingId: selectedBookingForChecklist.id,
+      //pdfBase64: pdfBase64,
+      //fileName: `checklist-${(selectedBookingForChecklist.name || selectedBookingForChecklist.customerName || 'unknown').replace(/\s+/g, '_')}-${selectedBookingForChecklist.date || 'unknown'}.pdf`
+    };
+
+    await fetch('https://hooks.zapier.com/hooks/catch/22652608/uymrar6/', {
+      method: 'POST',
+      mode: "no-cors",
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(zapierData)
+    });
+    
+    alert(`Checklist sent to ${staffMember.name}!`);
+    setShowChecklistModal(false);
+    setSelectedBookingForChecklist(null);
+    setSelectedStaffForChecklist("");
+    
+  } catch (error) {
+    console.error("Error sending checklist:", error);
+    alert("Failed to send checklist. Please try again.");
+  } finally {
+    setSendingChecklist(false);
+  }
+};
+
 
   // Save admin changes to Firebase
   const saveAdminChanges = async () => {
@@ -1422,7 +1497,10 @@ const fetchUnavailability = async () => {
                             >
                               View
                             </button>
-                            <GenerateChecklistButton booking={booking} />
+                           <GenerateChecklistButton 
+  booking={booking} 
+  onOpenModal={openChecklistModal}
+/>
                             <button 
                               onClick={() => showCancelBookingConfirm(booking.id)}
                               className="text-red-600 hover:text-red-900"
@@ -2162,6 +2240,109 @@ const fetchUnavailability = async () => {
           </div>
         </div>
       ) : null }
+
+{/* Send Checklist Modal */}
+{showChecklistModal && selectedBookingForChecklist && (
+  <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 transition-opacity duration-300">
+    <div 
+      className="bg-white rounded-lg shadow-lg w-full max-w-md mx-4 overflow-hidden transform transition-transform duration-300 ease-in-out"
+      style={{ 
+        animation: 'modal-appear 0.3s ease-out forwards'
+      }}
+    >
+      <div className="border-b border-gray-200 px-6 py-4">
+        <h3 className="text-lg font-medium text-gray-900">Send Checklist to Staff</h3>
+      </div>
+      
+      <div className="px-6 py-4">
+        {/* Booking Info */}
+        <div className="mb-4 p-3 bg-gray-50 rounded">
+          <p className="text-sm text-gray-600 font-medium">Booking Details:</p>
+          <p className="text-sm text-gray-600">{selectedBookingForChecklist.name || selectedBookingForChecklist.customerName}</p>
+          <p className="text-sm text-gray-600">{selectedBookingForChecklist.date || selectedBookingForChecklist.displayDate} at {selectedBookingForChecklist.time || selectedBookingForChecklist.displayTimeRange}</p>
+          <p className="text-sm text-gray-600">{selectedBookingForChecklist.service}</p>
+        </div>
+
+        {/* Staff Dropdown */}
+        <div className="mb-4">
+          <label htmlFor="staffSelect" className="block text-sm font-medium text-gray-700 mb-1">
+            Select Staff Member:
+          </label>
+          <select
+            id="staffSelect"
+            value={selectedStaffForChecklist}
+            onChange={(e) => setSelectedStaffForChecklist(e.target.value)}
+            className="block w-full px-3 py-2 rounded-md border border-gray-300 focus:ring-purple-500 focus:border-purple-500"
+          >
+            <option value="">Choose a staff member...</option>
+            {staff.filter(staffMember => staffMember.active).map((staffMember) => (
+              <option key={staffMember.id} value={staffMember.id}>
+                {staffMember.name} - {staffMember.phone}
+              </option>
+            ))}
+          </select>
+          <div className="mt-1 text-xs text-gray-500">
+            {staff.length === 0 ? (
+              <span className="text-red-600">No staff members found. Please add staff first.</span>
+            ) : (
+              <span>Showing {staff.filter(s => s.active).length} active staff members</span>
+            )}
+          </div>
+        </div>
+        
+        <p className="text-sm text-gray-500 italic">
+          The cleaning checklist PDF will be sent to the selected staff member via WhatsApp and email.
+        </p>
+      </div>
+      
+      <div className="bg-gray-50 px-6 py-3 flex justify-end space-x-3">
+        <button
+          type="button"
+          onClick={() => {
+            setShowChecklistModal(false);
+            setSelectedBookingForChecklist(null);
+            setSelectedStaffForChecklist("");
+          }}
+          className="px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300 transition-colors focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-opacity-50"
+          disabled={sendingChecklist}
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={sendChecklistToStaff}
+          disabled={!selectedStaffForChecklist || sendingChecklist}
+          className="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 transition-colors focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-opacity-50 flex items-center"
+        >
+          {sendingChecklist ? (
+            <>
+              <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              Sending...
+            </>
+          ) : 'Send Checklist'}
+        </button>
+      </div>
+    </div>
+    
+    <style jsx="true">{`
+      @keyframes modal-appear {
+        from {
+          opacity: 0;
+          transform: scale(0.95) translateY(-20px);
+        }
+        to {
+          opacity: 1;
+          transform: scale(1) translateY(0);
+        }
+      }
+    `}</style>
+  </div>
+)}
+
+
       
       {/* Confirmation Modal */}
       <ConfirmModal

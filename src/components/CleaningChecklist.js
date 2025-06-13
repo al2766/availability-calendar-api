@@ -1,10 +1,10 @@
 // src/components/CleaningChecklist.js
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
+import jsPDF from 'jspdf';
 
-// Component that will be converted to PDF
+// Component that will be converted to PDF (keep your existing ChecklistTemplate unchanged)
 const ChecklistTemplate = ({ booking }) => {
   // Check what type of booking we're dealing with
   const isHomeService = 
@@ -12,7 +12,7 @@ const ChecklistTemplate = ({ booking }) => {
     (booking.bedrooms !== undefined && booking.livingRooms !== undefined);
   
   // Extract booking details - handle both direct properties and nested ones
-  const customerName = booking.customerName || "No name provided";
+  const customerName = booking.customerName || booking.name || "No name provided";
   const address = booking.address || "Address not provided";
   const bookingDate = booking.displayDate || booking.date || "No date provided";
   const bookingTime = booking.displayTimeRange || booking.time || "No time provided";
@@ -188,59 +188,58 @@ const ChecklistTemplate = ({ booking }) => {
   );
 };
 
-// Function to generate and download PDF
-const generatePDF = (booking) => {
-  // Log the booking data to console for debugging
-  console.log("Generating PDF for booking:", booking);
-  
-  // First render the component to a hidden div
-  const hiddenDiv = document.createElement('div');
-  hiddenDiv.id = 'pdf-checklist-container';
-  hiddenDiv.style.position = 'absolute';
-  hiddenDiv.style.left = '-9999px';
-  document.body.appendChild(hiddenDiv);
-  
-  // Render the component to the hidden div
-  const root = ReactDOM.createRoot(hiddenDiv);
-  root.render(<ChecklistTemplate booking={booking} />);
-  
-  // Wait for rendering to complete
-  setTimeout(() => {
-    // Generate PDF
-    html2canvas(hiddenDiv, { scale: 2 }).then(canvas => {
-      const imgData = canvas.toDataURL('image/png');
-      const pdf = new jsPDF('p', 'pt', 'a4');
-      const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = pdf.internal.pageSize.getHeight();
-      const imgWidth = canvas.width;
-      const imgHeight = canvas.height;
-      const ratio = Math.min(pdfWidth / imgWidth, pdfHeight / imgHeight);
-      const imgX = (pdfWidth - imgWidth * ratio) / 2;
-      const imgY = 30;
-      
-      pdf.addImage(imgData, 'PNG', imgX, imgY, imgWidth * ratio, imgHeight * ratio);
-      
-      // Create a filename using the customer name or order ID
-      const customerName = booking.customerName || booking.name || "unknown";
-      const orderId = booking.id || booking.orderId || Date.now();
-      const filename = `Cleaning_Checklist_${customerName.replace(/\s+/g, '_')}_${orderId}.pdf`;
-      
-      pdf.save(filename);
-      
-      // Clean up
-      document.body.removeChild(hiddenDiv);
-    });
-  }, 500);
+// Modified function to generate PDF as base64 for sending via Zapier
+export const generateChecklistPDFBase64 = (booking) => {
+  return new Promise((resolve, reject) => {
+    console.log("Generating PDF base64 for booking:", booking);
+    
+    // Create a hidden div for rendering
+    const hiddenDiv = document.createElement('div');
+    hiddenDiv.id = 'pdf-checklist-container';
+    hiddenDiv.style.position = 'absolute';
+    hiddenDiv.style.left = '-9999px';
+    document.body.appendChild(hiddenDiv);
+    
+    // Render the component to the hidden div
+    const root = ReactDOM.createRoot(hiddenDiv);
+    root.render(<ChecklistTemplate booking={booking} />);
+    
+    // Wait for rendering to complete
+    setTimeout(() => {
+      html2canvas(hiddenDiv, { scale: 2 }).then(canvas => {
+        const imgData = canvas.toDataURL('image/png');
+        const pdf = new jsPDF('p', 'pt', 'a4');
+        const pdfWidth = pdf.internal.pageSize.getWidth();
+        const pdfHeight = pdf.internal.pageSize.getHeight();
+        const imgWidth = canvas.width;
+        const imgHeight = canvas.height;
+        const ratio = Math.min(pdfWidth / imgWidth, pdfHeight / imgHeight);
+        const imgX = (pdfWidth - imgWidth * ratio) / 2;
+        const imgY = 30;
+        
+        pdf.addImage(imgData, 'PNG', imgX, imgY, imgWidth * ratio, imgHeight * ratio);
+        
+        // Get base64 string instead of downloading
+        const pdfBase64 = pdf.output('datauristring').split(',')[1];
+        
+        // Clean up
+        document.body.removeChild(hiddenDiv);
+        
+        // Resolve with base64 data
+        resolve(pdfBase64);
+      }).catch(reject);
+    }, 500);
+  });
 };
 
-// Button component to generate checklist
-const GenerateChecklistButton = ({ booking }) => {
+// Updated button component that now opens modal instead of direct download
+const GenerateChecklistButton = ({ booking, onOpenModal }) => {
   return (
     <button
-      onClick={() => generatePDF(booking)}
+      onClick={() => onOpenModal(booking)}
       className="text-white-600 hover:text-white-900 mr-4"
     >
-      Generate Checklist
+      Send Checklist
     </button>
   );
 };
